@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-theme="light"] {
+  --bg-canvas: 245 246 248;
+  --bg-surface: 255 255 255;
+  --bg-subtle: 250 251 252;
+  --bg-elevated: 255 255 255;
+  --border-subtle: 229 231 235;
+  --border-default: 209 213 219;
+  --border-strong: 156 163 175;
+  --text-primary: 15 17 21;
+  --text-secondary: 75 85 99;
+  --text-muted: 156 163 175;
+  --text-inverse: 255 255 255;
+  --accent: 15 17 21;
+  --success: 22 163 74;
+  --info: 37 99 235;
+  --warn: 217 119 6;
+  --danger: 220 38 38;
+  --success-bg: 220 252 231;
+  --info-bg: 219 234 254;
+  --warn-bg: 254 243 199;
+  --danger-bg: 254 226 226;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg-canvas: 14 15 18;
+  --bg-surface: 22 24 29;
+  --bg-subtle: 28 31 36;
+  --bg-elevated: 32 35 41;
+  --border-subtle: 42 45 51;
+  --border-default: 53 57 64;
+  --border-strong: 75 79 86;
+  --text-primary: 255 255 255;
+  --text-secondary: 194 197 203;
+  --text-muted: 154 160 166;
+  --text-inverse: 15 17 21;
+  --accent: 255 255 255;
+  --success: 61 214 140;
+  --info: 124 158 255;
+  --warn: 245 166 35;
+  --danger: 239 83 80;
+  --success-bg: 20 70 50;
+  --info-bg: 30 50 100;
+  --warn-bg: 80 60 20;
+  --danger-bg: 80 30 30;
+  color-scheme: dark;
+}
+
+html, body, #root { height: 100%; }
+body {
+  @apply bg-canvas text-ink-primary;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme="light"] .canvas-grid,
+:root .canvas-grid {
+  background-image:
+    linear-gradient(rgba(0,0,0,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+[data-theme="dark"] .canvas-grid { background-image: none; }
+
+.recharts-cartesian-grid line { stroke: rgb(var(--border-subtle)) !important; }
+.recharts-text { fill: rgb(var(--text-muted)) !important; }
+
+* { scrollbar-color: rgb(var(--border-default)) transparent; }
+*:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }

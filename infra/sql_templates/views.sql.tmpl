@@ -1,0 +1,383 @@
+-- ============================================================
+-- GE Observability — parameterized view definitions
+-- Placeholders: {{PROJECT}}, {{DATASET}}
+-- Render with: infra/scripts/apply_views.py
+-- ============================================================
+
+-- ---------------------------------------------------------------
+-- v_admin_activity — Path 3 admin operations
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_admin_activity` AS
+WITH base AS (
+  SELECT
+    timestamp,
+    protopayload_auditlog.authenticationInfo.principalEmail AS actor_email,
+    REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+)$') AS action,
+    REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+Service)\.') AS service,
+    REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/([a-zA-Z]+)/[^/]+$') AS resource_type,
+    REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/[^/]+/([^/]+)$') AS resource_id,
+    REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/engines/([^/]+)') AS engine_id_raw,
+    protopayload_auditlog.resourceName AS full_resource,
+    protopayload_auditlog.methodName AS full_method,
+    protopayload_auditlog.requestMetadata.callerIp AS caller_ip,
+    receiveTimestamp
+  FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_activity`
+  WHERE protopayload_auditlog.methodName LIKE '%discoveryengine%'
+)
+SELECT
+  b.*,
+  CASE
+    WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    WHEN b.actor_email IS NULL OR b.actor_email = '' THEN 'UNKNOWN'
+    ELSE 'HUMAN'
+  END AS origin,
+  em.display_name AS engine_display_name
+FROM base b
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em
+  ON b.engine_id_raw = em.engine_id;
+
+-- ---------------------------------------------------------------
+-- v_builders — admin operation leaderboard
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_builders` AS
+SELECT
+  actor_email,
+  CASE
+    WHEN actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN actor_email LIKE '%@%' AND actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  COUNTIF(full_method LIKE '%CreateAgent') AS agents_created,
+  COUNTIF(full_method LIKE '%DeleteAgent') AS agents_deleted,
+  COUNTIF(full_method LIKE '%CreateEngine') AS engines_created,
+  COUNTIF(full_method LIKE '%DeleteEngine') AS engines_deleted,
+  COUNTIF(full_method LIKE '%CreateDataStore') AS datastores_created,
+  COUNTIF(full_method LIKE '%DeleteDataStore') AS datastores_deleted,
+  COUNTIF(full_method LIKE '%Update%') AS update_actions,
+  COUNT(*) AS total_admin_actions,
+  MIN(timestamp) AS first_admin_action,
+  MAX(timestamp) AS last_admin_action
+FROM `{{PROJECT}}.{{DATASET}}.v_admin_activity`
+WHERE actor_email IS NOT NULL
+GROUP BY actor_email, origin;
+
+-- ---------------------------------------------------------------
+-- v_data_access — Path 3 reads
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_data_access` AS
+WITH base AS (
+  SELECT
+    timestamp,
+    protopayload_auditlog.authenticationInfo.principalEmail AS actor_email,
+    REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+)$') AS action,
+    REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+Service)\.') AS service,
+    REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/engines/([^/]+)') AS engine_id_raw,
+    REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/dataStores/([^/]+)') AS datastore_id,
+    protopayload_auditlog.resourceName AS full_resource,
+    protopayload_auditlog.methodName AS full_method,
+    protopayload_auditlog.requestMetadata.callerIp AS caller_ip
+  FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_data_access`
+  WHERE protopayload_auditlog.methodName LIKE '%discoveryengine%'
+)
+SELECT
+  b.*,
+  CASE
+    WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    WHEN b.actor_email IS NULL OR b.actor_email = '' THEN 'UNKNOWN'
+    ELSE 'HUMAN'
+  END AS origin,
+  em.display_name AS engine_display_name
+FROM base b
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em
+  ON b.engine_id_raw = em.engine_id;
+
+-- ---------------------------------------------------------------
+-- v_data_access_summary — bucketed by real GE method dictionary
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_data_access_summary` AS
+SELECT
+  actor_email,
+  CASE
+    WHEN actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN actor_email LIKE '%@%' AND actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  engine_id_raw AS engine_id,
+  engine_display_name,
+  COUNTIF(full_method LIKE '%AssistantService.StreamAssist'
+       OR full_method LIKE '%AssistantService.Assist') AS chat_turns,
+  COUNTIF(full_method LIKE '%CompletionService.%Complete%') AS autocomplete_calls,
+  COUNTIF(full_method LIKE '%ConversationalSearchService.%') AS session_ops,
+  COUNTIF(full_method LIKE '%UserEventService.%') AS feedback_events,
+  COUNTIF(full_method LIKE '%SearchService.Search') AS programmatic_searches,
+  COUNTIF(full_method LIKE '%ListSessionFileMetadata') AS session_files,
+  COUNTIF(full_method LIKE '%CannedQueryService.%') AS canned_queries,
+  COUNTIF(full_method NOT LIKE '%AssistantService.%'
+      AND full_method NOT LIKE '%CompletionService.%'
+      AND full_method NOT LIKE '%ConversationalSearchService.%'
+      AND full_method NOT LIKE '%UserEventService.%'
+      AND full_method NOT LIKE '%SearchService.%'
+      AND full_method NOT LIKE '%CannedQueryService.%') AS other,
+  COUNT(*) AS total_data_access,
+  MIN(timestamp) AS first_access,
+  MAX(timestamp) AS last_access
+FROM `{{PROJECT}}.{{DATASET}}.v_data_access`
+WHERE actor_email IS NOT NULL
+GROUP BY actor_email, engine_id_raw, engine_display_name
+ORDER BY total_data_access DESC;
+
+-- ---------------------------------------------------------------
+-- v_conversations — prompt with PII redaction
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_conversations` AS
+WITH base AS (
+  SELECT
+    timestamp,
+    trace AS trace_id,
+    jsonPayload.useriamprincipal AS actor_email,
+    REGEXP_EXTRACT(jsonPayload.logmetadata.name, r'/engines/([^/]+)') AS engine_id_raw,
+    (SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt_raw,
+    REGEXP_EXTRACT(jsonPayload.response.answer.name, r'sessions/([^/]+)') AS session_id,
+    jsonPayload.response.answer.state AS state,
+    jsonPayload.response.assisttoken AS assist_token
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.logmetadata.methodname IN ('StreamAssist', 'Assist')
+    AND ARRAY_LENGTH(jsonPayload.request.query.parts) > 0
+),
+redacted AS (
+  SELECT * EXCEPT(prompt_raw),
+    REGEXP_REPLACE(
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(prompt_raw,
+            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL]'),
+          r'(?:\+?86[- ]?)?(?:1[3-9]\d{9})', '[PHONE]'),
+        r'\b\d{15,18}[Xx]?\b', '[ID-NUMBER]'),
+      r'\b\d{16,19}\b', '[CARD-NUMBER]'
+    ) AS prompt
+  FROM base
+)
+SELECT
+  r.*,
+  CASE
+    WHEN r.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN r.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN r.actor_email LIKE '%@%' AND r.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  em.display_name AS engine_display_name
+FROM redacted r
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em
+  ON r.engine_id_raw = em.engine_id;
+
+-- ---------------------------------------------------------------
+-- v_choices — model response chunks
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_choices` AS
+SELECT
+  timestamp,
+  trace AS trace_id,
+  resource.labels.engine_id AS engine_id_raw,
+  resource.labels.agent_id AS agent_id,
+  jsonPayload.finish_reason AS finish_reason,
+  (SELECT text FROM UNNEST(jsonPayload.content.parts) WHERE text IS NOT NULL AND (thought IS NULL OR thought = false) LIMIT 1) AS response_text,
+  (SELECT text FROM UNNEST(jsonPayload.content.parts) WHERE text IS NOT NULL AND thought = true LIMIT 1) AS reasoning_text,
+  ARRAY_LENGTH(jsonPayload.content.parts) AS part_count
+FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gen_ai_choice`;
+
+-- ---------------------------------------------------------------
+-- v_choices_agg — group streaming chunks by trace_id
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_choices_agg` AS
+SELECT
+  trace_id, agent_id,
+  ANY_VALUE(engine_id_raw) AS engine_id,
+  MIN(timestamp) AS first_chunk_at,
+  MAX(timestamp) AS last_chunk_at,
+  COUNT(*) AS chunk_count,
+  MAX(CASE finish_reason
+    WHEN 'STOP' THEN 4 WHEN 'MAX_TOKENS' THEN 3 WHEN 'SAFETY' THEN 2
+    WHEN 'FINISH_REASON_UNSPECIFIED' THEN 0 ELSE 1
+  END) AS finish_score,
+  STRING_AGG(response_text, '' ORDER BY timestamp) AS response_full,
+  STRING_AGG(reasoning_text, '\n---\n' ORDER BY timestamp) AS reasoning_full,
+  COUNTIF(response_text IS NOT NULL) AS response_chunk_count,
+  COUNTIF(reasoning_text IS NOT NULL) AS reasoning_chunk_count
+FROM `{{PROJECT}}.{{DATASET}}.v_choices`
+GROUP BY trace_id, agent_id;
+
+-- ---------------------------------------------------------------
+-- v_conversations_with_response — exact trace JOIN
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_conversations_with_response` AS
+SELECT
+  p.timestamp, p.actor_email, p.origin,
+  p.engine_id_raw, p.engine_display_name,
+  p.prompt, p.session_id,
+  p.trace_id AS prompt_trace_id,
+  ca.trace_id AS response_trace_id,
+  ca.response_full AS response_text,
+  ca.reasoning_full AS reasoning_text,
+  CASE ca.finish_score
+    WHEN 4 THEN 'STOP' WHEN 3 THEN 'MAX_TOKENS' WHEN 2 THEN 'SAFETY'
+    WHEN 1 THEN 'OTHER' WHEN 0 THEN 'UNSPECIFIED' ELSE NULL
+  END AS response_status,
+  ca.chunk_count,
+  IF(ca.trace_id IS NOT NULL, 'matched', 'no_response') AS join_status
+FROM `{{PROJECT}}.{{DATASET}}.v_conversations` p
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.v_choices_agg` ca
+  ON ca.trace_id = p.trace_id;
+
+-- ---------------------------------------------------------------
+-- v_user_usage — per user × engine
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_user_usage` AS
+WITH ua AS (
+  SELECT
+    jsonPayload.useriamprincipal AS actor_email,
+    REGEXP_EXTRACT(jsonPayload.logmetadata.name, r'/engines/([^/]+)') AS engine_id_raw,
+    timestamp,
+    jsonPayload.logmetadata.methodname AS method,
+    REGEXP_EXTRACT(TO_JSON_STRING(jsonPayload.response), r'sessions/([^"\\\/]+)') AS session_id
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.useriamprincipal IS NOT NULL
+)
+SELECT
+  ua.actor_email,
+  CASE
+    WHEN ua.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN ua.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN ua.actor_email LIKE '%@%' AND ua.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  ua.engine_id_raw AS engine_id,
+  em.display_name AS engine_display_name,
+  COUNT(*) AS event_count,
+  COUNTIF(ua.method = 'StreamAssist') AS chat_turns,
+  COUNT(DISTINCT ua.session_id) AS session_count,
+  MIN(ua.timestamp) AS first_seen,
+  MAX(ua.timestamp) AS last_seen,
+  TIMESTAMP_DIFF(MAX(ua.timestamp), MIN(ua.timestamp), DAY) AS days_active_span
+FROM ua
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em ON ua.engine_id_raw = em.engine_id
+GROUP BY actor_email, engine_id, engine_display_name;
+
+-- ---------------------------------------------------------------
+-- v_user_persona — 7 personas
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_user_persona` AS
+WITH
+  actors AS (
+    SELECT actor_email FROM `{{PROJECT}}.{{DATASET}}.v_user_usage`
+    UNION DISTINCT
+    SELECT actor_email FROM `{{PROJECT}}.{{DATASET}}.v_admin_activity` WHERE actor_email IS NOT NULL
+    UNION DISTINCT
+    SELECT actor_email FROM `{{PROJECT}}.{{DATASET}}.v_data_access` WHERE actor_email IS NOT NULL
+  ),
+  chat AS (
+    SELECT actor_email,
+      SUM(chat_turns) AS chat_turns_total,
+      SUM(session_count) AS sessions_total,
+      SUM(IF(last_seen >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY), chat_turns, 0)) AS chat_turns_7d,
+      SUM(IF(last_seen >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY), session_count, 0)) AS sessions_7d,
+      MAX(last_seen) AS last_chat
+    FROM `{{PROJECT}}.{{DATASET}}.v_user_usage` GROUP BY actor_email
+  ),
+  build AS (
+    SELECT actor_email,
+      SUM(agents_created) AS agents_c, SUM(agents_deleted) AS agents_d,
+      SUM(engines_created) AS engines_c, SUM(datastores_created) AS ds_c, SUM(datastores_deleted) AS ds_d,
+      MAX(last_admin_action) AS last_admin
+    FROM `{{PROJECT}}.{{DATASET}}.v_builders` GROUP BY actor_email
+  )
+SELECT
+  a.actor_email AS user,
+  CASE
+    WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  IFNULL(chat.chat_turns_total, 0) AS chat_turns_total,
+  IFNULL(chat.chat_turns_7d, 0) AS chat_turns_7d,
+  IFNULL(chat.sessions_total, 0) AS sessions_total,
+  IFNULL(build.agents_c, 0) + IFNULL(build.engines_c, 0) + IFNULL(build.ds_c, 0) AS resources_created,
+  IFNULL(build.agents_c, 0) AS agents_created,
+  IFNULL(build.engines_c, 0) AS engines_created,
+  IFNULL(build.ds_c, 0) AS datastores_created,
+  CASE
+    WHEN a.actor_email LIKE '%gserviceaccount.com' AND a.actor_email NOT LIKE '{{SIM_PATTERN}}' THEN 'AUTOMATION'
+    WHEN IFNULL(build.agents_c, 0) + IFNULL(build.engines_c, 0) + IFNULL(build.ds_c, 0) >= 1 THEN 'BUILDER'
+    WHEN IFNULL(chat.chat_turns_7d, 0) >= 20 AND IFNULL(chat.sessions_7d, 0) >= 3 THEN 'POWER_USER'
+    WHEN IFNULL(chat.chat_turns_7d, 0) >= 5 THEN 'ACTIVE_CONSUMER'
+    WHEN IFNULL(chat.chat_turns_total, 0) BETWEEN 1 AND 4 THEN 'TRIAL'
+    ELSE 'LURKER'
+  END AS persona,
+  GREATEST(IFNULL(chat.last_chat, TIMESTAMP('1970-01-01')), IFNULL(build.last_admin, TIMESTAMP('1970-01-01'))) AS last_seen,
+  LEAST(IFNULL(chat.last_chat, TIMESTAMP('9999-12-31')), IFNULL(build.last_admin, TIMESTAMP('9999-12-31'))) AS first_seen
+FROM actors a
+LEFT JOIN chat USING (actor_email)
+LEFT JOIN build USING (actor_email);
+
+-- ---------------------------------------------------------------
+-- v_engine_adoption
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_engine_adoption` AS
+WITH base AS (
+  SELECT
+    REGEXP_EXTRACT(jsonPayload.logmetadata.name, r'/engines/([^/]+)') AS engine_id,
+    jsonPayload.useriamprincipal AS actor_email,
+    jsonPayload.logmetadata.methodname AS method,
+    REGEXP_EXTRACT(TO_JSON_STRING(jsonPayload.response), r'sessions/([^"\\\/]+)') AS session_id
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+)
+SELECT
+  b.engine_id,
+  em.display_name AS engine_display_name,
+  COUNT(DISTINCT b.actor_email) AS unique_users,
+  COUNTIF(b.method = 'StreamAssist') AS chat_turns,
+  COUNT(DISTINCT b.session_id) AS sessions,
+  COUNT(*) AS total_events
+FROM base b
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em ON em.engine_id = b.engine_id
+WHERE b.engine_id IS NOT NULL
+GROUP BY engine_id, engine_display_name
+ORDER BY total_events DESC;
+
+-- ---------------------------------------------------------------
+-- v_zero_use_seats / v_dau (simple)
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_zero_use_seats` AS
+WITH all_users AS (
+  SELECT jsonPayload.useriamprincipal AS user_id, MIN(timestamp) AS first_seen
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.useriamprincipal IS NOT NULL
+  GROUP BY user_id
+),
+recent AS (
+  SELECT DISTINCT jsonPayload.useriamprincipal AS user_id
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
+    AND jsonPayload.useriamprincipal IS NOT NULL
+)
+SELECT a.user_id, a.first_seen, TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), a.first_seen, DAY) AS days_since_first_seen
+FROM all_users a
+LEFT JOIN recent r USING (user_id)
+WHERE r.user_id IS NULL
+ORDER BY a.first_seen ASC;
+
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_dau` AS
+SELECT
+  DATE(timestamp) AS d,
+  COUNT(DISTINCT jsonPayload.useriamprincipal) AS dau,
+  COUNT(*) AS total_events,
+  COUNTIF(jsonPayload.logmetadata.methodname = 'StreamAssist') AS chat_turns
+FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+WHERE jsonPayload.useriamprincipal IS NOT NULL
+GROUP BY d ORDER BY d DESC;

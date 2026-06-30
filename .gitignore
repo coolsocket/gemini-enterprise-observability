@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# Node
+node_modules/
+apps/web/dist/
+apps/web/.vite/
+
+# Build artifacts
+build/
+dist/
+
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfstate.backup
+terraform/.terraform.tfstate.lock.info
+terraform/crash.log
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local config / secrets
+.env
+.env.local
+*.local
+credentials.json
+service-account-*.json
+
+# Logs
+*.log
+/tmp/
+
+# Cloud Run local emulators
+.cloudbuild/

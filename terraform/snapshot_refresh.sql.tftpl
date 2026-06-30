@@ -1,0 +1,19 @@
+-- GE Observability: re-materialize all snapshot tables.
+-- Rendered by Terraform with project/dataset substituted.
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_admin_activity` AS SELECT * FROM `${project}.${dataset}.v_admin_activity`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_builders` AS SELECT * FROM `${project}.${dataset}.v_builders`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_choices` AS SELECT * FROM `${project}.${dataset}.v_choices`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_choices_agg` AS SELECT * FROM `${project}.${dataset}.v_choices_agg`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_conversations` AS SELECT * FROM `${project}.${dataset}.v_conversations`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_conversations_with_response` AS SELECT * FROM `${project}.${dataset}.v_conversations_with_response`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_data_access` AS SELECT * FROM `${project}.${dataset}.v_data_access`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_data_access_summary` AS SELECT * FROM `${project}.${dataset}.v_data_access_summary`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_dau` AS SELECT * FROM `${project}.${dataset}.v_dau`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_engine_adoption` AS SELECT * FROM `${project}.${dataset}.v_engine_adoption`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_user_persona` AS SELECT * FROM `${project}.${dataset}.v_user_persona`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_user_usage` AS SELECT * FROM `${project}.${dataset}.v_user_usage`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_zero_use_seats` AS SELECT * FROM `${project}.${dataset}.v_zero_use_seats`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_session_files` AS SELECT * FROM `${project}.${dataset}.v_session_files`;
+CREATE OR REPLACE TABLE `${project}.${dataset}.s_agent_usage` AS SELECT * FROM `${project}.${dataset}.v_agent_usage`;
+INSERT INTO `${project}.${dataset}.snapshot_meta` (snapshot_name, source_view, refreshed_at, row_count, refresh_seconds, triggered_by)
+VALUES ('_batch', 'all_views', CURRENT_TIMESTAMP(), 0, 0, 'scheduled_query');

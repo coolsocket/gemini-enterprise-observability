@@ -1,0 +1,20 @@
+# Copy this file to terraform.tfvars and fill in your values.
+
+project_id      = "YOUR-GCP-PROJECT-ID"
+region          = "us-central1"
+dataset_id      = "ge_observability"
+sink_name       = "ge-observability-unified"
+service_name    = "ge-observability"
+deploy_cloud_run = true
+container_image = "gcr.io/YOUR-GCP-PROJECT-ID/ge-observability:latest"
+
+# Who can hit the dashboard (granted roles/run.invoker on the Cloud Run service):
+iap_invokers = [
+  # "domain:example.com",
+  # "user:alice@example.com",
+  # "group:dashboard-viewers@example.com",
+]
+
+# Run the every-6h Scheduled Query that materializes snapshots.
+# Set to true only AFTER `make views` has been run once (views must exist first).
+enable_scheduled_refresh = false
