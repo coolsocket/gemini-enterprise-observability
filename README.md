@@ -181,10 +181,16 @@ See `docs/GE_CONSOLE_SETUP.md` for screenshots.
    each user *opened the Deep Research page*, independent of whether they actually submitted
    a research task.
 
-4. **NotebookLM Enterprise**: methods live under the namespace
-   `google.cloud.notebooklm.v1alpha.{NotebookService,SourceService,AudioOverviewService}`,
-   inside `serviceName="discoveryengine.googleapis.com"` (no separate `notebooklm.googleapis.com`).
-   The dashboard buckets them in `v_data_access_summary.notebooklm_{notebook,source,audio}_ops`.
+4. **NotebookLM Enterprise**: methods live under `google.cloud.notebooklm.v1main.*`
+   (not `v1alpha` as the public docs imply — empirically `v1main` is what the UI emits).
+   Six services observed: `NotebookService`, `SourceService`, `NoteService`, `ArtifactService`,
+   `AudioOverviewService`, `AccountService`. All inside `serviceName="discoveryengine.googleapis.com"`
+   (no separate `notebooklm.googleapis.com`). The dashboard buckets them into 3 columns:
+   `notebooklm_{notebook,content,audio}_ops`. NotebookLM rows appear with `engine_id=NULL`
+   because notebook resource names don't include `/engines/`.
+
+   ⚠️ Service accounts CANNOT trigger NotebookLM via REST — methods only respond to UI
+   sessions. Same for Deep Research. To 'test the dashboard' you must use the GE web UI.
    "User opened the NotebookLM home page" is also captured separately as
    `v_agentspace_navigation_summary.notebooklm_visits`.
 

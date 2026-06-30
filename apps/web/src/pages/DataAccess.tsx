@@ -43,8 +43,8 @@ export default function DataAccess() {
       render: (r) => <span className={r.deep_research_calls > 0 ? "text-info font-medium" : "text-ink-muted"} title="AsyncAssist + ReadAsyncAssist · prompt/response 不被记录，只能看到调用次数">{r.deep_research_calls}</span> },
     { key: "notebooklm_notebook_ops", label: "NotebookLM", num: true,
       render: (r) => {
-        const total = r.notebooklm_notebook_ops + r.notebooklm_source_ops + r.notebooklm_audio_ops;
-        return <span className={total > 0 ? "text-gblue font-medium" : "text-ink-muted"} title={`notebook ops=${r.notebooklm_notebook_ops}, source ops=${r.notebooklm_source_ops}, audio ops=${r.notebooklm_audio_ops}`}>{total}</span>;
+        const total = r.notebooklm_notebook_ops + r.notebooklm_content_ops + r.notebooklm_audio_ops;
+        return <span className={total > 0 ? "text-gblue font-medium" : "text-ink-muted"} title={`notebook ops=${r.notebooklm_notebook_ops} (CRUD + GenerateGuide + DiscoverSources + Account)\ncontent ops=${r.notebooklm_content_ops} (Sources + Notes + Artifacts)\naudio ops=${r.notebooklm_audio_ops} (podcast overviews)`}>{total}</span>;
       } },
     { key: "a2a_invocations", label: "A2A 调用", num: true,
       render: (r) => <span className={r.a2a_invocations > 0 ? "text-ggreen font-medium" : "text-ink-muted"} title="assistants.agents.a2a.v1.* — marketplace 或自建 agent 通过 A2A 协议调用">{r.a2a_invocations}</span> },

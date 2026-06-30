@@ -141,7 +141,7 @@ export type DataAccessSummaryRow = {
   chat_turns: number;
   deep_research_calls: number;
   notebooklm_notebook_ops: number;
-  notebooklm_source_ops: number;
+  notebooklm_content_ops: number;
   notebooklm_audio_ops: number;
   a2a_invocations: number;
   autocomplete_calls: number;

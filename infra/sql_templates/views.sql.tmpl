@@ -22,7 +22,8 @@ WITH base AS (
     protopayload_auditlog.requestMetadata.callerIp AS caller_ip,
     receiveTimestamp
   FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_activity`
-  WHERE protopayload_auditlog.methodName LIKE '%discoveryengine%'
+  WHERE (protopayload_auditlog.methodName LIKE '%discoveryengine%'
+      OR protopayload_auditlog.methodName LIKE '%notebooklm%')
 )
 SELECT
   b.*,
@@ -80,7 +81,8 @@ WITH base AS (
     protopayload_auditlog.methodName AS full_method,
     protopayload_auditlog.requestMetadata.callerIp AS caller_ip
   FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_data_access`
-  WHERE protopayload_auditlog.methodName LIKE '%discoveryengine%'
+  WHERE (protopayload_auditlog.methodName LIKE '%discoveryengine%'
+      OR protopayload_auditlog.methodName LIKE '%notebooklm%')
 )
 SELECT
   b.*,
@@ -114,10 +116,21 @@ SELECT
        OR full_method LIKE '%AssistantService.Assist') AS chat_turns,
   COUNTIF(full_method LIKE '%AssistantService.AsyncAssist'
        OR full_method LIKE '%AssistantService.ReadAsyncAssist') AS deep_research_calls,
-  -- NotebookLM (CRUD + sources + audio overviews), all under notebooklm.v1alpha namespace
-  COUNTIF(full_method LIKE '%notebooklm.v1alpha.NotebookService.%') AS notebooklm_notebook_ops,
-  COUNTIF(full_method LIKE '%notebooklm.v1alpha.SourceService.%') AS notebooklm_source_ops,
-  COUNTIF(full_method LIKE '%notebooklm.v1alpha.AudioOverviewService.%') AS notebooklm_audio_ops,
+  -- NotebookLM (real method namespace is v1main, NOT v1alpha. Catches both for safety.)
+  -- NotebookService: CreateNotebook, GetNotebook, GenerateNotebookGuide, DiscoverSources, etc.
+  -- AccountService: GetOrCreateAccount (per-user NotebookLM identity setup)
+  COUNTIF(full_method LIKE '%notebooklm.v1main.NotebookService.%'
+       OR full_method LIKE '%notebooklm.v1alpha.NotebookService.%'
+       OR full_method LIKE '%notebooklm.v1main.AccountService.%') AS notebooklm_notebook_ops,
+  -- SourceService: BatchCreateSources, GetSource. NoteService: BatchGetNotes.
+  -- ArtifactService: ListArtifacts, CreateArtifact (generated mind maps, briefs, etc.)
+  COUNTIF(full_method LIKE '%notebooklm.v1main.SourceService.%'
+       OR full_method LIKE '%notebooklm.v1alpha.SourceService.%'
+       OR full_method LIKE '%notebooklm.v1main.NoteService.%'
+       OR full_method LIKE '%notebooklm.v1main.ArtifactService.%') AS notebooklm_content_ops,
+  -- AudioOverviewService: podcast-style audio generated from notebook
+  COUNTIF(full_method LIKE '%notebooklm.v1main.AudioOverviewService.%'
+       OR full_method LIKE '%notebooklm.v1alpha.AudioOverviewService.%') AS notebooklm_audio_ops,
   -- A2A agent invocation (marketplace agents + custom agents via A2A protocol)
   COUNTIF(full_method LIKE '%assistants.agents.a2a.v1.message.%'
        OR full_method LIKE '%assistants.agents.a2a.v1.tasks.%') AS a2a_invocations,
@@ -134,7 +147,7 @@ SELECT
       AND full_method NOT LIKE '%UserEventService.%'
       AND full_method NOT LIKE '%SearchService.%'
       AND full_method NOT LIKE '%CannedQueryService.%'
-      AND full_method NOT LIKE '%notebooklm.v1alpha.%'
+      AND full_method NOT LIKE '%notebooklm.%'
       AND full_method NOT LIKE '%assistants.agents.a2a.v1.%') AS other,
   COUNT(*) AS total_data_access,
   MIN(timestamp) AS first_access,
