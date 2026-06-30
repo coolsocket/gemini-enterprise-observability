@@ -107,7 +107,7 @@ open http://localhost:8011
 **One-shot deploy** (assumes you have `gcloud` + `terraform` installed and authed):
 
 ```bash
-make deploy PROJECT=my-vivo-project REGION=us-central1
+make deploy PROJECT=my-project REGION=us-central1
 ```
 
 This runs in order:
@@ -134,12 +134,12 @@ open http://localhost:8080
 ### Step-by-step (if `make deploy` fails partway)
 
 ```bash
-make tf-plan   PROJECT=my-vivo-project    # preview
-make tf-apply  PROJECT=my-vivo-project    # provision infra
+make tf-plan   PROJECT=my-project    # preview
+make tf-apply  PROJECT=my-project    # provision infra
 # (manually enable GE Console toggles here, wait for logs to land)
-make image     PROJECT=my-vivo-project    # build container
-make views     PROJECT=my-vivo-project    # apply BQ views
-make bootstrap PROJECT=my-vivo-project    # ingest metadata
+make image     PROJECT=my-project    # build container
+make views     PROJECT=my-project    # apply BQ views
+make bootstrap PROJECT=my-project    # ingest metadata
 ```
 
 ---
