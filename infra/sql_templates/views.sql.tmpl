@@ -437,7 +437,7 @@ SELECT
   END AS origin,
   b.page_type,
   b.agent_id,
-  b.agent_name,
+  MAX(b.agent_name) AS agent_name,  -- GE sometimes emits NULL name; coalesce across rows
   b.engine_id_raw,
   em.display_name AS engine_display_name,
   COUNT(*) AS visits,
@@ -446,7 +446,7 @@ SELECT
 FROM base b
 LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em
   ON b.engine_id_raw = em.engine_id
-GROUP BY b.actor_email, b.page_type, b.agent_id, b.agent_name, b.engine_id_raw, em.display_name
+GROUP BY b.actor_email, b.page_type, b.agent_id, b.engine_id_raw, em.display_name
 ORDER BY visits DESC;
 
 -- ---------------------------------------------------------------
