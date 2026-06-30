@@ -274,6 +274,48 @@ function qs(params: Record<string, string | null | undefined>): string {
   return parts.length ? "?" + parts.join("&") : "";
 }
 
+export type UserListEntry = {
+  actor_email: string;
+  origin: Origin;
+  total_data_access: number;
+  chat_turns: number;
+  deep_research_calls: number;
+  notebooklm_ops: number;
+  last_access: string | null;
+};
+
+export type UserDeepDive = {
+  actor_email: string;
+  persona: PersonaRow[];
+  data_access_summary: DataAccessSummaryRow[];
+  agentspace_summary: AgentspaceNavSummaryRow[];
+  agentspace_detail: AgentspaceNavRow[];
+  conversations: Array<{
+    timestamp: string;
+    prompt: string;
+    response_text: string | null;
+    engine_display_name: string | null;
+    join_status: "matched" | "no_response";
+  }>;
+  builder: BuilderRow[];
+  admin_events: Array<{
+    timestamp: string;
+    action: string;
+    service: string | null;
+    resource_type: string | null;
+    resource_id: string | null;
+  }>;
+  data_access_events: Array<{
+    timestamp: string;
+    action: string;
+    service: string | null;
+    engine_id_raw: string | null;
+    datastore_id: string | null;
+    full_method: string;
+  }>;
+  session_files: SessionFileRow[];
+};
+
 export const api = {
   healthz: () => get<{ status: string; project: string; dataset: string }>("/api/healthz"),
   meta:    () => get<Meta>("/api/meta"),
@@ -283,6 +325,8 @@ export const api = {
     get<Summary & Record<string, any>>(`/api/summary${qs({ origin, engine_id: engineId })}`),
   view:    <T = Record<string, unknown>>(name: string, origin?: Origin, engineId?: string | null) =>
     get<ViewResponse<T>>(`/api/v/${encodeURIComponent(name)}${qs({ origin, engine_id: engineId })}`),
+  users:   () => get<{ users: UserListEntry[]; count: number }>("/api/users"),
+  user:    (email: string) => get<UserDeepDive>(`/api/user/${encodeURIComponent(email)}`),
   refreshStatus: () => get<RefreshStatus>("/api/refresh/status"),
   refreshNow:    () => post<{ refreshed: any[]; ok_count: number }>("/api/refresh?triggered_by=ui"),
   quotaConfig:   () => get<QuotaConfig>("/api/quota/config"),

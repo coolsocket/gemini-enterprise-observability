@@ -174,6 +174,65 @@ def view_rows(view: str, limit: int = 1000, origin: str | None = None,
 
 
 # ============================================================
+# /api/user — single-user deep dive (aggregated across all views)
+# ============================================================
+
+@app.get("/api/users")
+def list_users() -> dict[str, Any]:
+    """All actors who've shown up anywhere, with high-level totals for picker."""
+    sql = f"""
+    SELECT
+      actor_email,
+      ANY_VALUE(origin) AS origin,
+      SUM(total_data_access) AS total_data_access,
+      SUM(chat_turns) AS chat_turns,
+      SUM(deep_research_calls) AS deep_research_calls,
+      SUM(notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops) AS notebooklm_ops,
+      MAX(last_access) AS last_access
+    FROM `{PROJECT}.{DATASET}.v_data_access_summary`
+    GROUP BY actor_email
+    ORDER BY total_data_access DESC
+    """
+    rows = [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+    return {"users": rows, "count": len(rows)}
+
+
+@app.get("/api/user/{email}")
+def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
+    """Aggregated single-user view across 9 sources, queried concurrently."""
+    import concurrent.futures
+    tbl = lambda v: f"{PROJECT}.{DATASET}." + (v if live else snapshot_name(v))
+    queries = {
+        "persona":             f"SELECT * FROM `{tbl('v_user_persona')}` WHERE user = @email LIMIT 1",
+        "data_access_summary": f"SELECT * FROM `{tbl('v_data_access_summary')}` WHERE actor_email = @email ORDER BY total_data_access DESC",
+        "agentspace_summary":  f"SELECT * FROM `{tbl('v_agentspace_navigation_summary')}` WHERE actor_email = @email LIMIT 1",
+        "agentspace_detail":   f"SELECT * FROM `{tbl('v_agentspace_navigation')}` WHERE actor_email = @email ORDER BY visits DESC LIMIT 50",
+        "conversations":       f"SELECT timestamp, prompt, response_text, engine_display_name, join_status FROM `{tbl('v_conversations_with_response')}` WHERE actor_email = @email ORDER BY timestamp DESC LIMIT 50",
+        "builder":             f"SELECT * FROM `{tbl('v_builders')}` WHERE actor_email = @email LIMIT 1",
+        "admin_events":        f"SELECT timestamp, action, service, resource_type, resource_id FROM `{tbl('v_admin_activity')}` WHERE actor_email = @email ORDER BY timestamp DESC LIMIT 50",
+        "data_access_events":  f"SELECT timestamp, action, service, engine_id_raw, datastore_id, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email ORDER BY timestamp DESC LIMIT 100",
+        "session_files":       f"SELECT * FROM `{tbl('v_session_files')}` WHERE actor_email = @email ORDER BY last_op DESC LIMIT 30",
+    }
+
+    def run_one(key_sql):
+        key, sql = key_sql
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("email", "STRING", email)]
+        )
+        try:
+            return key, [_json_safe(dict(r)) for r in _bq.query(sql, job_config=job_config).result()]
+        except Exception as e:
+            log.warning(f"user_deep_dive: {key} failed: {e}")
+            return key, []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=9) as pool:
+        results = dict(pool.map(run_one, queries.items()))
+
+    payload = {"actor_email": email, "source": "live_view" if live else "snapshot", **results}
+    return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
+
+
+# ============================================================
 # Snapshot refresh endpoints
 # ============================================================
 

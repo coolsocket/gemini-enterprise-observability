@@ -9,6 +9,7 @@ const Persona       = lazy(() => import("./pages/Persona"));
 const Builders      = lazy(() => import("./pages/Builders"));
 const Activity      = lazy(() => import("./pages/Activity"));
 const DataAccess    = lazy(() => import("./pages/DataAccess"));
+const UserDeepDive  = lazy(() => import("./pages/UserDeepDive"));
 const Raw           = lazy(() => import("./pages/Raw"));
 const Settings      = lazy(() => import("./pages/Settings"));
 
@@ -35,6 +36,8 @@ export default function App() {
           <Route path="/conversations" element={page(Conversations)} />
           <Route path="/files"         element={page(Files)} />
           <Route path="/persona"       element={page(Persona)} />
+          <Route path="/user"          element={page(UserDeepDive)} />
+          <Route path="/user/:email"   element={page(UserDeepDive)} />
           <Route path="/builders"    element={page(Builders)} />
           <Route path="/data-access" element={page(DataAccess)} />
           <Route path="/activity"    element={page(Activity)} />

@@ -20,6 +20,7 @@ const SECTIONS: { labelKey: string; items: Item[] }[] = [
     labelKey: "nav.section.user",
     items: [
       { to: "/persona",       labelKey: "nav.persona",       icon: IUser },
+      { to: "/user",          labelKey: "nav.user",          icon: IUser },
       { to: "/conversations", labelKey: "nav.conversations", icon: IChat },
       { to: "/builders",      labelKey: "nav.builders",      icon: IWrench },
     ],

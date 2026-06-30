@@ -11,6 +11,7 @@ const ROUTE_KEYS: Record<string, string> = {
   "/overview":      "overview",
   "/conversations": "conversations",
   "/persona":       "persona",
+  "/user":          "user",
   "/builders":      "builders",
   "/data-access":   "data_access",
   "/files":         "files",
@@ -18,6 +19,12 @@ const ROUTE_KEYS: Record<string, string> = {
   "/raw":           "raw",
   "/settings":      "settings",
 };
+
+// Map any /user/* path also to the "user" route key
+function lookupRouteKey(pathname: string): string {
+  if (pathname.startsWith("/user/") || pathname === "/user") return "user";
+  return ROUTE_KEYS[pathname] ?? "";
+}
 
 function StatusBadge({ ok }: { ok: boolean }) {
   const { t } = useI18n();
@@ -228,7 +235,7 @@ function RefreshButton() {
 export default function Header() {
   const { t } = useI18n();
   const loc = useLocation();
-  const routeKey = ROUTE_KEYS[loc.pathname] ?? "";
+  const routeKey = lookupRouteKey(loc.pathname);
   const meta = routeKey
     ? { title: t(`route.${routeKey}.title` as any), subtitle: t(`route.${routeKey}.subtitle` as any) }
     : { title: "", subtitle: "" };

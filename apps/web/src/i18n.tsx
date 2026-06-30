@@ -7,6 +7,7 @@ const ZH = {
   // --- nav / sidebar ---
   "nav.overview": "总览",
   "nav.persona": "用户画像",
+  "nav.user": "用户 deep dive",
   "nav.conversations": "对话内容",
   "nav.builders": "Builder 排行",
   "nav.data_access": "Data Access",
@@ -41,6 +42,8 @@ const ZH = {
   "route.overview.subtitle": "采纳与质量 · 治理与审计",
   "route.persona.title": "用户画像",
   "route.persona.subtitle": "POWER · ACTIVE · TRIAL · BUILDER · EXPLORER · LURKER",
+  "route.user.title": "用户 deep dive",
+  "route.user.subtitle": "单用户全部活动：persona · special agent · NotebookLM · 对话 · audit",
   "route.conversations.title": "对话内容",
   "route.conversations.subtitle": "用户的 prompt + 模型回答",
   "route.builders.title": "Builder 排行",
@@ -171,6 +174,7 @@ const ZH = {
 const EN: typeof ZH = {
   "nav.overview": "Overview",
   "nav.persona": "User personas",
+  "nav.user": "User deep dive",
   "nav.conversations": "Conversations",
   "nav.builders": "Builder leaderboard",
   "nav.data_access": "Data Access",
@@ -203,6 +207,8 @@ const EN: typeof ZH = {
   "route.overview.subtitle": "Adoption & quality · Governance & audit",
   "route.persona.title": "User personas",
   "route.persona.subtitle": "POWER · ACTIVE · TRIAL · BUILDER · EXPLORER · LURKER",
+  "route.user.title": "User deep dive",
+  "route.user.subtitle": "Single user, all activity: persona · special agent · NotebookLM · conversations · audit",
   "route.conversations.title": "Conversations",
   "route.conversations.subtitle": "User prompts + model responses",
   "route.builders.title": "Builder leaderboard",
