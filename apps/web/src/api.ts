@@ -313,7 +313,44 @@ export type UserDeepDive = {
     datastore_id: string | null;
     full_method: string;
   }>;
+  // Per-feature drill-down arrays (each guaranteed complete, not subsampled by autocomplete noise)
+  dr_events: Array<{ timestamp: string; action: string; full_method: string }>;
+  notebooklm_events: Array<{ timestamp: string; action: string; full_method: string }>;
+  a2a_events: Array<{ timestamp: string; action: string; full_method: string }>;
+  chat_events: Array<{ timestamp: string; action: string; full_method: string }>;
   session_files: SessionFileRow[];
+  agentspace_events: Array<{
+    timestamp: string;
+    page_type: string;
+    agent_id: string | null;
+    agent_name: string | null;
+  }>;
+};
+
+export type AgentDirectoryRow = {
+  agent_id: string;
+  agent_name: string;
+  agent_type: "built-in" | "custom";
+  signal_kind: "api_calls" | "page_opens";
+  total: number;
+  unique_users: number;
+  top_user_email: string | null;
+  top_user_value: number | null;
+  last_activity: string | null;
+};
+
+export type AgentDeepDive = {
+  agent_id: string;
+  directory: AgentDirectoryRow | null;
+  users: Array<{ actor_email: string; origin: Origin; calls: number; last_seen: string | null }>;
+  events: Array<{
+    timestamp: string;
+    action: string;
+    actor_email: string;
+    full_method?: string;
+    engine_id_raw?: string | null;
+    agent_id?: string | null;
+  }>;
 };
 
 export const api = {
@@ -327,6 +364,8 @@ export const api = {
     get<ViewResponse<T>>(`/api/v/${encodeURIComponent(name)}${qs({ origin, engine_id: engineId })}`),
   users:   () => get<{ users: UserListEntry[]; count: number }>("/api/users"),
   user:    (email: string) => get<UserDeepDive>(`/api/user/${encodeURIComponent(email)}`),
+  agents:  () => get<{ agents: AgentDirectoryRow[]; count: number }>("/api/agents"),
+  agent:   (agentId: string) => get<AgentDeepDive>(`/api/agent/${encodeURIComponent(agentId)}`),
   refreshStatus: () => get<RefreshStatus>("/api/refresh/status"),
   refreshNow:    () => post<{ refreshed: any[]; ok_count: number }>("/api/refresh?triggered_by=ui"),
   quotaConfig:   () => get<QuotaConfig>("/api/quota/config"),

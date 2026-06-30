@@ -28,6 +28,7 @@ const SECTIONS: { labelKey: string; items: Item[] }[] = [
   {
     labelKey: "nav.section.resource",
     items: [
+      { to: "/agents",      labelKey: "nav.agents",      icon: IWrench },
       { to: "/data-access", labelKey: "nav.data_access", icon: ISearch },
       { to: "/files",       labelKey: "nav.files",       icon: IZap },
     ],

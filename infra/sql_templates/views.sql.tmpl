@@ -479,3 +479,89 @@ WHERE jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NUL
   AND jsonPayload.useriamprincipal IS NOT NULL
 GROUP BY actor_email, origin
 ORDER BY total_navigation_events DESC;
+
+-- ---------------------------------------------------------------
+-- v_agent_directory — agent-centric pivot: one row per known agent
+-- Sources unioned:
+--   1. Built-in agents inferred from data_access_summary buckets
+--      (Deep Research, NotebookLM, REST Search)
+--   2. Custom agents discovered via agentspace_navigation (page_type='agent')
+--   3. Agents seen in gen_ai.choice (via v_agent_usage's agent_id field)
+-- Each row: agent_id, agent_name, agent_type, signal_kind, total, unique_users,
+-- top_user_email, last_activity, top_user_value.
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_agent_directory` AS
+WITH
+  -- Built-in: Deep Research, aggregated across all engines/users
+  built_in_dr AS (
+    SELECT
+      'deep_research' AS agent_id,
+      'Deep Research' AS agent_name,
+      'built-in' AS agent_type,
+      'api_calls' AS signal_kind,
+      SUM(deep_research_calls) AS total,
+      COUNT(DISTINCT IF(deep_research_calls > 0, actor_email, NULL)) AS unique_users,
+      ARRAY_AGG(STRUCT(actor_email AS email, deep_research_calls AS n)
+                ORDER BY deep_research_calls DESC LIMIT 1)[OFFSET(0)] AS top_user,
+      MAX(IF(deep_research_calls > 0, last_access, NULL)) AS last_activity
+    FROM `{{PROJECT}}.{{DATASET}}.v_data_access_summary`
+    HAVING SUM(deep_research_calls) > 0
+  ),
+  -- Built-in: NotebookLM (all sub-services collapsed)
+  built_in_nb AS (
+    SELECT
+      'notebooklm' AS agent_id,
+      'NotebookLM' AS agent_name,
+      'built-in' AS agent_type,
+      'api_calls' AS signal_kind,
+      SUM(notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops) AS total,
+      COUNT(DISTINCT IF(notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops > 0, actor_email, NULL)) AS unique_users,
+      ARRAY_AGG(STRUCT(actor_email AS email,
+                       notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops AS n)
+                ORDER BY notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops DESC LIMIT 1)[OFFSET(0)] AS top_user,
+      MAX(IF(notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops > 0, last_access, NULL)) AS last_activity
+    FROM `{{PROJECT}}.{{DATASET}}.v_data_access_summary`
+    HAVING SUM(notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops) > 0
+  ),
+  -- Built-in: A2A invocations (rolled up across all marketplace + custom A2A agents)
+  built_in_a2a AS (
+    SELECT
+      'a2a_protocol' AS agent_id,
+      'A2A 协议调用' AS agent_name,
+      'built-in' AS agent_type,
+      'api_calls' AS signal_kind,
+      SUM(a2a_invocations) AS total,
+      COUNT(DISTINCT IF(a2a_invocations > 0, actor_email, NULL)) AS unique_users,
+      ARRAY_AGG(STRUCT(actor_email AS email, a2a_invocations AS n)
+                ORDER BY a2a_invocations DESC LIMIT 1)[OFFSET(0)] AS top_user,
+      MAX(IF(a2a_invocations > 0, last_access, NULL)) AS last_activity
+    FROM `{{PROJECT}}.{{DATASET}}.v_data_access_summary`
+    HAVING SUM(a2a_invocations) > 0
+  ),
+  -- Custom agents from navigation (Hermes Slides etc.)
+  custom_agents AS (
+    SELECT
+      agent_id,
+      MAX(agent_name) AS agent_name,
+      'custom' AS agent_type,
+      'page_opens' AS signal_kind,
+      SUM(visits) AS total,
+      COUNT(DISTINCT actor_email) AS unique_users,
+      ARRAY_AGG(STRUCT(actor_email AS email, visits AS n)
+                ORDER BY visits DESC LIMIT 1)[OFFSET(0)] AS top_user,
+      MAX(last_visit) AS last_activity
+    FROM `{{PROJECT}}.{{DATASET}}.v_agentspace_navigation`
+    WHERE page_type = 'agent' AND agent_id IS NOT NULL
+    GROUP BY agent_id
+  )
+SELECT
+  agent_id, agent_name, agent_type, signal_kind, total, unique_users,
+  top_user.email AS top_user_email, top_user.n AS top_user_value,
+  last_activity
+FROM (
+  SELECT * FROM built_in_dr
+  UNION ALL SELECT * FROM built_in_nb
+  UNION ALL SELECT * FROM built_in_a2a
+  UNION ALL SELECT * FROM custom_agents
+)
+ORDER BY total DESC;

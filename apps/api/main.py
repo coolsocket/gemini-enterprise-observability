@@ -49,6 +49,7 @@ VIEWS: dict[str, dict[str, str]] = {
     "v_agent_usage":              {"label": "Agent 调用统计",      "desc": "每个子 agent 接到的 chat traces / chunks"},
     "v_agentspace_navigation":          {"label": "Agentspace 入口浏览",  "desc": "用户打开了哪个 special agent / NotebookLM / Deep Research 页面"},
     "v_agentspace_navigation_summary":  {"label": "Agentspace 入口汇总",  "desc": "按用户 pivot：home / gallery / deep-research / notebook-lm / custom agent 访问次数"},
+    "v_agent_directory":                {"label": "Agent 目录",          "desc": "每个 agent 一行：built-in (Deep Research / NotebookLM / A2A) + custom"},
 }
 
 # Views that have an `origin` column — supports ?origin= filter
@@ -177,6 +178,110 @@ def view_rows(view: str, limit: int = 1000, origin: str | None = None,
 # /api/user — single-user deep dive (aggregated across all views)
 # ============================================================
 
+@app.get("/api/agents")
+def list_agents() -> dict[str, Any]:
+    """All known agents, with usage totals + top user."""
+    sql = f"SELECT * FROM `{PROJECT}.{DATASET}.{snapshot_name('v_agent_directory')}` ORDER BY total DESC"
+    try:
+        rows = [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+    except Exception:
+        # snapshot may not exist yet; fall back to live view
+        rows = [_json_safe(dict(r)) for r in _bq.query(
+            f"SELECT * FROM `{PROJECT}.{DATASET}.v_agent_directory` ORDER BY total DESC"
+        ).result()]
+    return {"agents": rows, "count": len(rows)}
+
+
+@app.get("/api/agent/{agent_id}")
+def agent_deep_dive(agent_id: str) -> JSONResponse:
+    """All users + events for a given agent."""
+    import concurrent.futures
+
+    def with_param(sql: str):
+        try:
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("aid", "STRING", agent_id)]
+            )
+            return [_json_safe(dict(r)) for r in _bq.query(sql, job_config=job_config).result()]
+        except Exception as e:
+            log.warning(f"agent_deep_dive {agent_id}: {e}")
+            return []
+
+    # Different aggregation strategy per agent kind.
+    # Built-in: aggregate from data_access_summary's typed buckets.
+    # Custom:   aggregate from v_agentspace_navigation by agent_id.
+    # All built-in agents pull events from v_data_access (which has action/full_method derived)
+    if agent_id == "deep_research":
+        per_user_sql = f"""
+        SELECT actor_email, origin, deep_research_calls AS calls, last_access AS last_seen
+        FROM `{PROJECT}.{DATASET}.v_data_access_summary`
+        WHERE deep_research_calls > 0 ORDER BY deep_research_calls DESC
+        """
+        events_sql = f"""
+        SELECT timestamp, action, full_method, engine_id_raw, actor_email
+        FROM `{PROJECT}.{DATASET}.v_data_access`
+        WHERE full_method LIKE '%AsyncAssist%' OR full_method LIKE '%ReadAsyncAssist%'
+        ORDER BY timestamp DESC LIMIT 200
+        """
+    elif agent_id == "notebooklm":
+        per_user_sql = f"""
+        SELECT actor_email, origin,
+               notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops AS calls,
+               last_access AS last_seen
+        FROM `{PROJECT}.{DATASET}.v_data_access_summary`
+        WHERE notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops > 0
+        ORDER BY calls DESC
+        """
+        events_sql = f"""
+        SELECT timestamp, action, full_method, engine_id_raw, actor_email
+        FROM `{PROJECT}.{DATASET}.v_data_access`
+        WHERE full_method LIKE '%notebooklm.%'
+        ORDER BY timestamp DESC LIMIT 200
+        """
+    elif agent_id == "a2a_protocol":
+        per_user_sql = f"""
+        SELECT actor_email, origin, a2a_invocations AS calls, last_access AS last_seen
+        FROM `{PROJECT}.{DATASET}.v_data_access_summary`
+        WHERE a2a_invocations > 0 ORDER BY a2a_invocations DESC
+        """
+        events_sql = f"""
+        SELECT timestamp, action, full_method, engine_id_raw, actor_email
+        FROM `{PROJECT}.{DATASET}.v_data_access`
+        WHERE full_method LIKE '%assistants.agents.a2a.v1.%'
+        ORDER BY timestamp DESC LIMIT 200
+        """
+    else:
+        # Custom agent — from agentspace_navigation + raw user_activity events
+        per_user_sql = f"""
+        SELECT actor_email, origin, visits AS calls, last_visit AS last_seen
+        FROM `{PROJECT}.{DATASET}.v_agentspace_navigation`
+        WHERE page_type = 'agent' AND agent_id = @aid
+        ORDER BY visits DESC
+        """
+        events_sql = f"""
+        SELECT timestamp,
+               'OpenAgent' AS action,
+               jsonPayload.useriamprincipal AS actor_email,
+               jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid AS agent_id
+        FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+        WHERE jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid = @aid
+        ORDER BY timestamp DESC LIMIT 200
+        """
+
+    users = with_param(per_user_sql)
+    events = with_param(events_sql)
+
+    # Pull the directory row for the agent header
+    dir_row = with_param(f"SELECT * FROM `{PROJECT}.{DATASET}.v_agent_directory` WHERE agent_id = @aid LIMIT 1")
+
+    return JSONResponse(content={
+        "agent_id": agent_id,
+        "directory": dir_row[0] if dir_row else None,
+        "users": users,
+        "events": events,
+    }, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/users")
 def list_users() -> dict[str, Any]:
     """All actors who've shown up anywhere, with high-level totals for picker."""
@@ -210,8 +315,26 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
         "conversations":       f"SELECT timestamp, prompt, response_text, engine_display_name, join_status FROM `{tbl('v_conversations_with_response')}` WHERE actor_email = @email ORDER BY timestamp DESC LIMIT 50",
         "builder":             f"SELECT * FROM `{tbl('v_builders')}` WHERE actor_email = @email LIMIT 1",
         "admin_events":        f"SELECT timestamp, action, service, resource_type, resource_id FROM `{tbl('v_admin_activity')}` WHERE actor_email = @email ORDER BY timestamp DESC LIMIT 50",
-        "data_access_events":  f"SELECT timestamp, action, service, engine_id_raw, datastore_id, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email ORDER BY timestamp DESC LIMIT 100",
+        # data_access_events excludes autocomplete noise (AdvancedCompleteQuery is fired on every keystroke)
+        "data_access_events":  f"SELECT timestamp, action, service, engine_id_raw, datastore_id, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email AND full_method NOT LIKE '%CompletionService.%' ORDER BY timestamp DESC LIMIT 200",
+        # Per-feature event arrays for drill-down (always non-empty when the corresponding metric > 0)
+        "dr_events":           f"SELECT timestamp, action, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email AND (full_method LIKE '%AsyncAssist%' OR full_method LIKE '%ReadAsyncAssist%') ORDER BY timestamp DESC LIMIT 100",
+        "notebooklm_events":   f"SELECT timestamp, action, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email AND full_method LIKE '%notebooklm.%' ORDER BY timestamp DESC LIMIT 100",
+        "a2a_events":          f"SELECT timestamp, action, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email AND full_method LIKE '%assistants.agents.a2a.v1.%' ORDER BY timestamp DESC LIMIT 100",
+        "chat_events":         f"SELECT timestamp, action, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email AND (full_method LIKE '%AssistantService.StreamAssist' OR full_method LIKE '%AssistantService.Assist') ORDER BY timestamp DESC LIMIT 100",
         "session_files":       f"SELECT * FROM `{tbl('v_session_files')}` WHERE actor_email = @email ORDER BY last_op DESC LIMIT 30",
+        # Raw per-visit navigation events (un-aggregated, for drill-down)
+        # Always live: navigation lives in user_activity table, no snapshot for the raw stream
+        "agentspace_events":   f"""SELECT
+              timestamp,
+              jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype AS page_type,
+              jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid  AS agent_id,
+              jsonPayload.request.userevent.agentspaceinfo.agentinfo.name     AS agent_name
+            FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+            WHERE jsonPayload.useriamprincipal = @email
+              AND jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NULL
+            ORDER BY timestamp DESC
+            LIMIT 200""",
     }
 
     def run_one(key_sql):
@@ -225,7 +348,7 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
             log.warning(f"user_deep_dive: {key} failed: {e}")
             return key, []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=9) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as pool:
         results = dict(pool.map(run_one, queries.items()))
 
     payload = {"actor_email": email, "source": "live_view" if live else "snapshot", **results}

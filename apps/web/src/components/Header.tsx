@@ -12,6 +12,7 @@ const ROUTE_KEYS: Record<string, string> = {
   "/conversations": "conversations",
   "/persona":       "persona",
   "/user":          "user",
+  "/agents":        "agents",
   "/builders":      "builders",
   "/data-access":   "data_access",
   "/files":         "files",
@@ -20,9 +21,10 @@ const ROUTE_KEYS: Record<string, string> = {
   "/settings":      "settings",
 };
 
-// Map any /user/* path also to the "user" route key
+// Map any /user/* path also to the "user" route key, same for /agent/*
 function lookupRouteKey(pathname: string): string {
   if (pathname.startsWith("/user/") || pathname === "/user") return "user";
+  if (pathname.startsWith("/agent/") || pathname === "/agents") return "agents";
   return ROUTE_KEYS[pathname] ?? "";
 }
 
