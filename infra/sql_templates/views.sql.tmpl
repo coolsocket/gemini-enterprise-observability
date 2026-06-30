@@ -112,11 +112,14 @@ SELECT
   engine_display_name,
   COUNTIF(full_method LIKE '%AssistantService.StreamAssist'
        OR full_method LIKE '%AssistantService.Assist') AS chat_turns,
+  COUNTIF(full_method LIKE '%AssistantService.AsyncAssist'
+       OR full_method LIKE '%AssistantService.ReadAsyncAssist') AS deep_research_calls,
   COUNTIF(full_method LIKE '%CompletionService.%Complete%') AS autocomplete_calls,
   COUNTIF(full_method LIKE '%ConversationalSearchService.%') AS session_ops,
   COUNTIF(full_method LIKE '%UserEventService.%') AS feedback_events,
   COUNTIF(full_method LIKE '%SearchService.Search') AS programmatic_searches,
-  COUNTIF(full_method LIKE '%ListSessionFileMetadata') AS session_files,
+  COUNTIF(full_method LIKE '%ListSessionFileMetadata'
+       OR full_method LIKE '%DownloadSessionFile') AS session_files,
   COUNTIF(full_method LIKE '%CannedQueryService.%') AS canned_queries,
   COUNTIF(full_method NOT LIKE '%AssistantService.%'
       AND full_method NOT LIKE '%CompletionService.%'

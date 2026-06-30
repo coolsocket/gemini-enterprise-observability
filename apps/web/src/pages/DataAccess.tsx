@@ -39,6 +39,10 @@ export default function DataAccess() {
       render: (r) => r.engine_display_name ?? <span className="text-ink-muted">—</span> },
     { key: "chat_turns", label: "Chat 回合", num: true,
       render: (r) => <span className={r.chat_turns > 0 ? "text-ggreen font-medium" : "text-ink-muted"}>{r.chat_turns}</span> },
+    { key: "deep_research_calls", label: "Deep Research", num: true,
+      render: (r) => <span className={r.deep_research_calls > 0 ? "text-info font-medium" : "text-ink-muted"} title="AsyncAssist + ReadAsyncAssist · prompt/response 不被记录，只能看到调用次数">{r.deep_research_calls}</span> },
+    { key: "session_files", label: "文件操作", num: true,
+      render: (r) => <span className={r.session_files > 0 ? "text-ink-secondary" : "text-ink-muted"} title="List + Download SessionFile">{r.session_files}</span> },
     { key: "programmatic_searches", label: "Search", num: true,
       render: (r) => <span className={r.programmatic_searches > 0 ? "text-gblue" : "text-ink-muted"}>{r.programmatic_searches}</span> },
     { key: "session_ops", label: "Session 操作", num: true,
@@ -75,8 +79,9 @@ export default function DataAccess() {
   return (
     <div className="space-y-4">
       {/* Hint */}
-      <div className="text-xs text-ink-muted px-1">
-        💡 数据面读取统计。Autocomplete（搜索框打字）属于噪音指标已隐藏；如需查看原始逐笔记录展开下方时间线。
+      <div className="text-xs text-ink-muted px-1 space-y-1">
+        <div>💡 数据面读取统计。Autocomplete（搜索框打字）属于噪音指标已隐藏；如需查看原始逐笔记录展开下方时间线。</div>
+        <div>⚠️ <b>Deep Research</b>（AsyncAssist / ReadAsyncAssist）只能看到<b>调用次数</b> — prompt + response 文本不被 gen_ai 日志记录（与 GE UI 路径同源限制）。要看原始 prompt 内容请去 GE 后台的 Deep Research 任务列表。</div>
       </div>
 
       <Panel title={`谁查了什么 · 汇总 ${origin ? `· ${origin}` : ""}`}>

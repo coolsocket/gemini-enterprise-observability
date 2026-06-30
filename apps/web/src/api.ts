@@ -139,6 +139,7 @@ export type DataAccessSummaryRow = {
   engine_id: string | null;
   engine_display_name: string | null;
   chat_turns: number;
+  deep_research_calls: number;
   autocomplete_calls: number;
   session_ops: number;
   feedback_events: number;

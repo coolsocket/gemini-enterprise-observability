@@ -169,16 +169,24 @@ See `docs/GE_CONSOLE_SETUP.md` for screenshots.
    but no `choice` logs — so prompts from the GE web app appear with `join_status='no_response'`
    in `v_conversations_with_response`.
 
-3. **Create events lack resource ID**: `CreateAgent` audit log's `resourceName` is the
+3. **Deep Research (AsyncAssist)**: GE Deep Research uses `AssistantService.AsyncAssist`
+   + `ReadAsyncAssist`. These calls appear in `cloudaudit_googleapis_com_data_access`
+   (Path 3), so the dashboard counts them per user/engine in
+   `v_data_access_summary.deep_research_calls`. **But the prompt + response text are NOT
+   emitted to `gen_ai.user.message` / `gen_ai.choice`** (same fundamental limitation as the
+   GE web UI). To see actual research content, use the Deep Research task list in the GE admin
+   console.
+
+4. **Create events lack resource ID**: `CreateAgent` audit log's `resourceName` is the
    parent (`assistants/default_assistant`), not the new agent's ID. So per-actor "alive
    resources" can't be attributed back to who created what. The Overview page shows a
    system-wide alive count via direct `ListAgents` API.
 
-4. **PII in prompts**: `v_conversations` applies regex redaction for emails, phone numbers,
+5. **PII in prompts**: `v_conversations` applies regex redaction for emails, phone numbers,
    ID-like numbers, and credit-card-like numbers. **It is not a full DLP** — long-form PII
    (names, addresses) is NOT redacted. For production: layer Cloud DLP API on top.
 
-5. **No public GE seat/license API**: "purchased seats" is a manual config value in
+6. **No public GE seat/license API**: "purchased seats" is a manual config value in
    `quota_config` table. "Claimed" derived from distinct active actors in 30 days.
 
 ---
