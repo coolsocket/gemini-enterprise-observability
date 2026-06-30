@@ -284,19 +284,43 @@ def agent_deep_dive(agent_id: str) -> JSONResponse:
 
 @app.get("/api/users")
 def list_users() -> dict[str, Any]:
-    """All actors who've shown up anywhere, with high-level totals for picker."""
+    """All actors who've shown up anywhere, with rich per-user dimensions for picker."""
     sql = f"""
+    WITH base AS (
+      SELECT
+        actor_email,
+        ANY_VALUE(origin) AS origin,
+        SUM(chat_turns) AS chat_turns,
+        SUM(deep_research_calls) AS deep_research_calls,
+        SUM(notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops) AS notebooklm_ops,
+        SUM(a2a_invocations) AS a2a_invocations,
+        SUM(programmatic_searches) AS programmatic_searches,
+        SUM(session_files) AS session_files,
+        SUM(total_data_access) AS total_data_access,
+        COUNT(DISTINCT IF(engine_id IS NOT NULL, engine_id, NULL)) AS engines_touched,
+        MAX(last_access) AS last_access
+      FROM `{PROJECT}.{DATASET}.v_data_access_summary`
+      GROUP BY actor_email
+    )
     SELECT
-      actor_email,
-      ANY_VALUE(origin) AS origin,
-      SUM(total_data_access) AS total_data_access,
-      SUM(chat_turns) AS chat_turns,
-      SUM(deep_research_calls) AS deep_research_calls,
-      SUM(notebooklm_notebook_ops + notebooklm_content_ops + notebooklm_audio_ops) AS notebooklm_ops,
-      MAX(last_access) AS last_access
-    FROM `{PROJECT}.{DATASET}.v_data_access_summary`
-    GROUP BY actor_email
-    ORDER BY total_data_access DESC
+      b.actor_email,
+      b.origin,
+      p.persona,
+      b.chat_turns,
+      b.deep_research_calls,
+      b.notebooklm_ops,
+      b.a2a_invocations,
+      b.programmatic_searches,
+      b.session_files,
+      IFNULL(nav.custom_agent_visits, 0) AS custom_agent_visits,
+      IFNULL(nav.distinct_custom_agents, 0) AS distinct_custom_agents,
+      b.engines_touched,
+      b.total_data_access,
+      b.last_access
+    FROM base b
+    LEFT JOIN `{PROJECT}.{DATASET}.v_user_persona` p ON b.actor_email = p.user
+    LEFT JOIN `{PROJECT}.{DATASET}.v_agentspace_navigation_summary` nav ON b.actor_email = nav.actor_email
+    ORDER BY b.total_data_access DESC
     """
     rows = [_json_safe(dict(r)) for r in _bq.query(sql).result()]
     return {"users": rows, "count": len(rows)}

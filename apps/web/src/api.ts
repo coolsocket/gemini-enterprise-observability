@@ -277,10 +277,17 @@ function qs(params: Record<string, string | null | undefined>): string {
 export type UserListEntry = {
   actor_email: string;
   origin: Origin;
-  total_data_access: number;
+  persona: Persona | null;
   chat_turns: number;
   deep_research_calls: number;
   notebooklm_ops: number;
+  a2a_invocations: number;
+  programmatic_searches: number;
+  session_files: number;
+  custom_agent_visits: number;
+  distinct_custom_agents: number;
+  engines_touched: number;
+  total_data_access: number;
   last_access: string | null;
 };
 

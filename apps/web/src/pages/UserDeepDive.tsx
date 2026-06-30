@@ -24,41 +24,198 @@ const PERSONA_TAG: Record<string, string> = {
 };
 
 // ============================================================
-// User picker (landing)
+// User picker (landing) — searchable, sortable, filterable directory
 // ============================================================
+type SortKey = "total" | "chat" | "dr" | "nb" | "agents" | "last";
+const SORT_LABELS: Record<SortKey, string> = {
+  total:  "总活动",
+  chat:   "Chat",
+  dr:     "Deep Research",
+  nb:     "NotebookLM",
+  agents: "Custom agent 访问",
+  last:   "最近活动",
+};
+const SORT_FNS: Record<SortKey, (u: import("../api").UserListEntry) => number> = {
+  total:  u => u.total_data_access,
+  chat:   u => u.chat_turns,
+  dr:     u => u.deep_research_calls,
+  nb:     u => u.notebooklm_ops,
+  agents: u => u.custom_agent_visits,
+  last:   u => u.last_access ? new Date(u.last_access).getTime() : 0,
+};
+
+const ORIGIN_FILTERS: Array<{ key: "ALL" | "HUMAN" | "SIMULATED" | "AUTOMATION"; label: string; cls: string }> = [
+  { key: "ALL",        label: "全部",   cls: "" },
+  { key: "HUMAN",      label: "真人",   cls: "text-ggreen" },
+  { key: "SIMULATED",  label: "模拟",   cls: "text-info" },
+  { key: "AUTOMATION", label: "自动",   cls: "text-warn" },
+];
+
+function FeaturePill({ icon, value, color }: { icon: string; value: number; color: string }) {
+  if (value === 0) return <span className="text-ink-muted opacity-30 tabular-nums w-10 text-right text-[10px]">·</span>;
+  return (
+    <span className={`tabular-nums text-[11px] font-semibold ${color} w-10 text-right`} title={`${icon} ${value}`}>
+      {value}
+    </span>
+  );
+}
+
+function shortenEmail(email: string): string {
+  if (email.length <= 38) return email;
+  return email.slice(0, 28) + "…" + email.slice(-7);
+}
+
+function relTs(ts: string | null): string {
+  if (!ts) return "—";
+  const now = Date.now();
+  const t = new Date(ts).getTime();
+  const diffMin = Math.floor((now - t) / 60000);
+  if (diffMin < 1) return "刚刚";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD < 30) return `${diffD}d`;
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
 function Picker() {
   const navigate = useNavigate();
   const users = useQuery({ queryKey: ["users"], queryFn: () => api.users() });
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("total");
+  const [originFilter, setOriginFilter] = useState<"ALL" | "HUMAN" | "SIMULATED" | "AUTOMATION">("ALL");
+
   if (!users.data) return <EmptyState title="加载用户列表…" />;
+
+  const filtered = users.data.users
+    .filter(u => originFilter === "ALL" || u.origin === originFilter)
+    .filter(u => !search || u.actor_email.toLowerCase().includes(search.toLowerCase()) || (u.persona ?? "").toLowerCase().includes(search.toLowerCase()));
+  const sorted = [...filtered].sort((a, b) => SORT_FNS[sortBy](b) - SORT_FNS[sortBy](a));
+  const maxTotal = Math.max(1, ...sorted.map(u => u.total_data_access));
+
   return (
-    <div className="space-y-4">
-      <Panel title="选个用户深入看看">
-        <div className="text-xs text-ink-muted mb-3">
-          单用户全部活动一屏可见：persona · 各种 special agent · NotebookLM 明细 · custom agent 访问 · 对话 · 完整 audit。
+    <div className="space-y-4 max-w-[1200px]">
+      <Panel title={`员工目录 · ${sorted.length} / ${users.data.count}`}>
+        {/* Controls bar */}
+        <div className="flex flex-wrap items-center gap-3 mb-3 pb-3 border-b border-border-subtle/40">
+          <input
+            type="text"
+            placeholder="🔍 搜索 email / persona…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="flex-1 min-w-[180px] h-8 px-3 rounded-md bg-subtle/60 border border-border-subtle text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none focus:border-info/60"
+          />
+          <div className="flex items-center gap-1 text-[11px]">
+            <span className="text-ink-muted mr-1">排序:</span>
+            {(Object.keys(SORT_LABELS) as SortKey[]).map(k => (
+              <button
+                key={k}
+                onClick={() => setSortBy(k)}
+                className={`h-7 px-2.5 rounded ${sortBy === k ? "bg-info/15 text-info border border-info/30" : "text-ink-secondary hover:text-ink-primary"}`}
+              >
+                {SORT_LABELS[k]}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 text-[11px] ml-auto">
+            <span className="text-ink-muted mr-1">origin:</span>
+            {ORIGIN_FILTERS.map(f => (
+              <button
+                key={f.key}
+                onClick={() => setOriginFilter(f.key)}
+                className={`h-7 px-2.5 rounded ${originFilter === f.key ? "bg-subtle border border-border-subtle" : "text-ink-muted hover:text-ink-secondary"} ${originFilter === f.key ? f.cls : ""}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-          {users.data.users.map((u) => (
-            <button
-              key={u.actor_email}
-              onClick={() => navigate(`/user/${encodeURIComponent(u.actor_email)}`)}
-              className="text-left px-3 py-2.5 rounded-lg border border-border-subtle bg-subtle hover:border-info/50 hover:bg-info-bg/10 transition-colors group"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <div className="font-mono text-xs text-ink-primary truncate group-hover:text-info">
-                  {u.actor_email}
-                </div>
-                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${ORIGIN_TAG[u.origin ?? "UNKNOWN"]} ml-2 shrink-0`}>
-                  {u.origin ?? "—"}
-                </span>
-              </div>
-              <div className="flex gap-3 text-[11px] text-ink-muted">
-                <span>chat <b className="text-ink-secondary">{u.chat_turns}</b></span>
-                {u.deep_research_calls > 0 && <span>DR <b className="text-info">{u.deep_research_calls}</b></span>}
-                {u.notebooklm_ops > 0 && <span>NB <b className="text-gblue">{u.notebooklm_ops}</b></span>}
-                <span className="text-ink-muted ml-auto">{u.last_access ? new Date(u.last_access).toISOString().slice(5, 16).replace("T", " ") : "—"}</span>
-              </div>
-            </button>
-          ))}
+
+        {/* Header row */}
+        <div className="flex items-center gap-3 px-3 py-1.5 text-[10px] uppercase tracking-wide text-ink-muted border-b border-border-subtle/40">
+          <div className="flex-1 min-w-0">用户</div>
+          <div className="w-20 shrink-0">Persona</div>
+          <div className="hidden lg:flex items-center gap-1 shrink-0">
+            <span className="w-10 text-right" title="Chat">💬</span>
+            <span className="w-10 text-right" title="Deep Research">🔬</span>
+            <span className="w-10 text-right" title="NotebookLM">📓</span>
+            <span className="w-10 text-right" title="Custom agent visits">🧩</span>
+            <span className="w-10 text-right" title="REST Search">🔎</span>
+            <span className="w-10 text-right" title="Files">📎</span>
+          </div>
+          <div className="w-16 text-right shrink-0">活动</div>
+          <div className="w-14 text-right shrink-0">最近</div>
+        </div>
+
+        {/* User rows */}
+        {sorted.length === 0 ? (
+          <EmptyState title="没匹配项" hint="改改 search 或 filter" />
+        ) : (
+          <div>
+            {sorted.map(u => {
+              const pct = (u.total_data_access / maxTotal) * 100;
+              return (
+                <button
+                  key={u.actor_email}
+                  onClick={() => navigate(`/user/${encodeURIComponent(u.actor_email)}`)}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-xs text-left border-b border-border-subtle/20 hover:bg-info-bg/8 hover:border-info/30 transition-colors group"
+                >
+                  {/* Email + origin */}
+                  <div className="flex-1 min-w-0 flex items-center gap-2">
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+                      u.origin === "HUMAN" ? "bg-ggreen" :
+                      u.origin === "SIMULATED" ? "bg-info" :
+                      u.origin === "AUTOMATION" ? "bg-warn" : "bg-ink-muted"
+                    }`} />
+                    <span className="font-mono text-ink-primary group-hover:text-info truncate" title={u.actor_email}>
+                      {shortenEmail(u.actor_email)}
+                    </span>
+                    {u.engines_touched > 1 && (
+                      <span className="text-[9px] text-ink-muted ml-1 shrink-0">×{u.engines_touched} eng</span>
+                    )}
+                  </div>
+
+                  {/* Persona tag */}
+                  <div className="w-20 shrink-0">
+                    {u.persona ? (
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${PERSONA_TAG[u.persona] ?? PERSONA_TAG.LURKER}`}>
+                        {u.persona.replace("_", " ")}
+                      </span>
+                    ) : <span className="text-ink-muted">—</span>}
+                  </div>
+
+                  {/* Feature usage pills (hidden on small) */}
+                  <div className="hidden lg:flex items-center gap-1 shrink-0">
+                    <FeaturePill icon="💬" value={u.chat_turns} color="text-ggreen" />
+                    <FeaturePill icon="🔬" value={u.deep_research_calls} color="text-info" />
+                    <FeaturePill icon="📓" value={u.notebooklm_ops} color="text-gblue" />
+                    <FeaturePill icon="🧩" value={u.custom_agent_visits} color="text-ggreen" />
+                    <FeaturePill icon="🔎" value={u.programmatic_searches} color="text-gblue" />
+                    <FeaturePill icon="📎" value={u.session_files} color="text-ink-secondary" />
+                  </div>
+
+                  {/* Total activity bar + number */}
+                  <div className="w-16 shrink-0 flex items-center gap-1.5">
+                    <div className="flex-1 h-1 rounded-full bg-subtle overflow-hidden">
+                      <div className="h-full bg-info/50" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="tabular-nums text-ink-primary font-medium w-7 text-right">{u.total_data_access}</span>
+                  </div>
+
+                  {/* Last seen */}
+                  <div className="w-14 text-right shrink-0 text-[10px] text-ink-muted font-mono">
+                    {relTs(u.last_access)}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Footer hint */}
+        <div className="text-[10px] text-ink-muted mt-3 px-1">
+          点击进入单用户全部活动详情 · 每个数字可继续 drill down 看具体哪几次
         </div>
       </Panel>
     </div>
