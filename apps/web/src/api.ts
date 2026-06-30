@@ -140,6 +140,10 @@ export type DataAccessSummaryRow = {
   engine_display_name: string | null;
   chat_turns: number;
   deep_research_calls: number;
+  notebooklm_notebook_ops: number;
+  notebooklm_source_ops: number;
+  notebooklm_audio_ops: number;
+  a2a_invocations: number;
   autocomplete_calls: number;
   session_ops: number;
   feedback_events: number;
@@ -150,6 +154,33 @@ export type DataAccessSummaryRow = {
   total_data_access: number;
   first_access: string;
   last_access: string;
+};
+
+export type AgentspaceNavRow = {
+  actor_email: string;
+  origin: Origin;
+  page_type: "home" | "agent_gallery" | "agent" | "deep-research" | "notebook-lm";
+  agent_id: string | null;
+  agent_name: string | null;
+  engine_id_raw: string | null;
+  engine_display_name: string | null;
+  visits: number;
+  first_visit: string;
+  last_visit: string;
+};
+
+export type AgentspaceNavSummaryRow = {
+  actor_email: string;
+  origin: Origin;
+  home_visits: number;
+  gallery_visits: number;
+  deep_research_visits: number;
+  notebooklm_visits: number;
+  custom_agent_visits: number;
+  distinct_custom_agents: number;
+  custom_agent_names: string | null;
+  total_navigation_events: number;
+  last_visit: string;
 };
 
 async function get<T>(path: string): Promise<T> {

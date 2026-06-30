@@ -47,6 +47,8 @@ VIEWS: dict[str, dict[str, str]] = {
     "v_user_usage":               {"label": "用户 × Engine",      "desc": "每用户在每个 engine 上的活动量"},
     "v_session_files":            {"label": "文件活动会话",        "desc": "用户与 session files 的交互（list/download）"},
     "v_agent_usage":              {"label": "Agent 调用统计",      "desc": "每个子 agent 接到的 chat traces / chunks"},
+    "v_agentspace_navigation":          {"label": "Agentspace 入口浏览",  "desc": "用户打开了哪个 special agent / NotebookLM / Deep Research 页面"},
+    "v_agentspace_navigation_summary":  {"label": "Agentspace 入口汇总",  "desc": "按用户 pivot：home / gallery / deep-research / notebook-lm / custom agent 访问次数"},
 }
 
 # Views that have an `origin` column — supports ?origin= filter
@@ -54,6 +56,7 @@ VIEWS_WITH_ORIGIN: set[str] = {
     "v_user_persona", "v_conversations", "v_conversations_with_response",
     "v_admin_activity", "v_builders", "v_data_access",
     "v_data_access_summary", "v_user_usage", "v_session_files",
+    "v_agentspace_navigation", "v_agentspace_navigation_summary",
 }
 
 # Snapshot table name (s_*) corresponds to each view (v_*)
@@ -84,6 +87,7 @@ VIEWS_WITH_ENGINE: set[str] = {
     "v_conversations", "v_conversations_with_response",
     "v_admin_activity", "v_data_access", "v_data_access_summary",
     "v_user_usage", "v_engine_adoption", "v_session_files", "v_agent_usage",
+    "v_agentspace_navigation",
 }
 
 

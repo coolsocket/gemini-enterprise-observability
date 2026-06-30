@@ -44,8 +44,11 @@ client = bigquery.Client(project=PROJECT)
 
 # BQ doesn't support multi-statement scripts well via Python — split on ;
 # (each CREATE OR REPLACE VIEW is independent)
-# Split on `;` then keep only those containing actual DDL (look for CREATE keyword)
-raw = [s.strip() for s in sql.split(";")]
+# IMPORTANT: strip `--` line comments BEFORE splitting, otherwise a `;` inside
+# a comment slices a statement in half.
+import re as _re
+sql_no_comments = _re.sub(r"--[^\n]*", "", sql)
+raw = [s.strip() for s in sql_no_comments.split(";")]
 statements = [s for s in raw if "CREATE OR REPLACE" in s.upper()]
 ok = 0
 errors: list[tuple[int, str]] = []

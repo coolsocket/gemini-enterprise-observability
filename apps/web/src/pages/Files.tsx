@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, AgentUsageRow, SessionFileRow } from "../api";
+import { api, AgentUsageRow, AgentspaceNavSummaryRow, AgentspaceNavRow, SessionFileRow } from "../api";
 import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
@@ -29,6 +29,14 @@ export default function Files() {
     queryKey: ["v_agent_usage", null, engineId],
     queryFn: () => api.view<AgentUsageRow>("v_agent_usage", null, engineId),
   });
+  const navSum = useQuery({
+    queryKey: ["v_agentspace_navigation_summary", origin],
+    queryFn: () => api.view<AgentspaceNavSummaryRow>("v_agentspace_navigation_summary", origin),
+  });
+  const navDetail = useQuery({
+    queryKey: ["v_agentspace_navigation", origin, engineId],
+    queryFn: () => api.view<AgentspaceNavRow>("v_agentspace_navigation", origin, engineId),
+  });
 
   const fileCols: Col<SessionFileRow>[] = [
     { key: "actor_email", label: "用户", mono: true },
@@ -55,6 +63,59 @@ export default function Files() {
     { key: "last_op", label: "最近操作", mono: true, render: (r) => fmtTs(r.last_op) },
   ];
 
+  const navSumCols: Col<AgentspaceNavSummaryRow>[] = [
+    { key: "actor_email", label: "用户", mono: true },
+    { key: "origin", label: "Origin",
+      render: (r) => (
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${ORIGIN_TAG[r.origin ?? "UNKNOWN"]}`}>
+          {r.origin ?? "—"}
+        </span>
+      ) },
+    { key: "deep_research_visits", label: "Deep Research", num: true,
+      render: (r) => <span className={r.deep_research_visits > 0 ? "text-info font-medium" : "text-ink-muted"}>{r.deep_research_visits}</span> },
+    { key: "notebooklm_visits", label: "NotebookLM", num: true,
+      render: (r) => <span className={r.notebooklm_visits > 0 ? "text-gblue font-medium" : "text-ink-muted"}>{r.notebooklm_visits}</span> },
+    { key: "custom_agent_visits", label: "自建 agent", num: true,
+      render: (r) => <span className={r.custom_agent_visits > 0 ? "text-ggreen font-medium" : "text-ink-muted"}>{r.custom_agent_visits}</span> },
+    { key: "distinct_custom_agents", label: "Distinct", num: true,
+      render: (r) => <span className="text-ink-secondary">{r.distinct_custom_agents}</span> },
+    { key: "custom_agent_names", label: "Agent 列表",
+      render: (r) => <span className="text-xs text-ink-muted">{r.custom_agent_names ?? "—"}</span> },
+    { key: "gallery_visits", label: "Gallery 浏览", num: true,
+      render: (r) => <span className="text-ink-muted">{r.gallery_visits}</span> },
+    { key: "total_navigation_events", label: "总访问", num: true,
+      render: (r) => <span className="font-semibold">{r.total_navigation_events}</span> },
+    { key: "last_visit", label: "最近访问", mono: true, render: (r) => fmtTs(r.last_visit) },
+  ];
+
+  const navDetailCols: Col<AgentspaceNavRow>[] = [
+    { key: "actor_email", label: "用户", mono: true },
+    { key: "origin", label: "Origin",
+      render: (r) => (
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${ORIGIN_TAG[r.origin ?? "UNKNOWN"]}`}>
+          {r.origin ?? "—"}
+        </span>
+      ) },
+    { key: "page_type", label: "入口类型",
+      render: (r) => {
+        const colorMap: Record<string, string> = {
+          "deep-research": "text-info",
+          "notebook-lm":   "text-gblue",
+          "agent":         "text-ggreen",
+          "agent_gallery": "text-ink-secondary",
+          "home":          "text-ink-muted",
+        };
+        return <span className={`font-mono text-xs ${colorMap[r.page_type] ?? "text-ink-muted"}`}>{r.page_type}</span>;
+      } },
+    { key: "agent_name", label: "Agent 名",
+      render: (r) => r.agent_name ? <span className="text-ink-primary">{r.agent_name}</span> : <span className="text-ink-muted">—</span> },
+    { key: "agent_id", label: "Agent ID", mono: true,
+      render: (r) => <span className="text-xs text-ink-muted">{r.agent_id ?? "—"}</span> },
+    { key: "visits", label: "访问数", num: true,
+      render: (r) => <span className="font-semibold">{r.visits}</span> },
+    { key: "last_visit", label: "最近", mono: true, render: (r) => fmtTs(r.last_visit) },
+  ];
+
   const agentCols: Col<AgentUsageRow>[] = [
     { key: "agent_id", label: "Agent ID", mono: true,
       render: (r) => <span className="text-gblue font-medium">{r.agent_id}</span> },
@@ -79,6 +140,28 @@ export default function Files() {
           <li>拿不到的：具体文件名、文件大小、上传时间。仅能拿到"该会话有文件交互"的元数据信号</li>
         </ul>
       </div>
+
+      {/* NEW: Agentspace navigation — which special agent did users open? */}
+      <Panel title={`Special Agent 入口浏览 · 汇总`}>
+        <div className="text-xs text-ink-muted mb-2 px-1">
+          💡 从 <code className="bg-subtle px-1 rounded text-[10px]">UserEventService.WriteUserEvent</code> 的 <code className="bg-subtle px-1 rounded text-[10px]">agentspaceinfo.agentspacepagetype</code> 抓的"用户打开 X agent 页面"事件。<b>这是导航不是调用</b>。Deep Research 实际调用看 Data Access 页的 <code className="bg-subtle px-1 rounded text-[10px]">deep_research_calls</code> 列；NotebookLM 实际操作如果走 <code className="bg-subtle px-1 rounded text-[10px]">notebooklm.v1alpha.*</code> 也会进 Data Access。
+        </div>
+        {!navSum.data ? <EmptyState title="加载中…" /> :
+         navSum.data.rows.length === 0 ? (
+          <EmptyState title="无入口访问记录" hint="该 origin 下没有用户访问过 home/agent_gallery/deep-research/notebook-lm/agent 页面" />
+        ) : (
+          <DataTable rows={navSum.data.rows} cols={navSumCols} filterKeys={["actor_email", "custom_agent_names"]} />
+        )}
+      </Panel>
+
+      <Panel title={`Special Agent 入口浏览 · 逐条`}>
+        {!navDetail.data ? <EmptyState title="加载中…" /> :
+         navDetail.data.rows.length === 0 ? (
+          <EmptyState title="无入口访问记录" hint="该 origin/engine 下没有 agentspace 入口事件" />
+        ) : (
+          <DataTable rows={navDetail.data.rows} cols={navDetailCols} filterKeys={["actor_email", "page_type", "agent_name", "agent_id"]} dense />
+        )}
+      </Panel>
 
       <Panel title={`文件活动 · ${files.data?.count ?? 0} 个 session`}>
         {!files.data ? <EmptyState title="加载中…" /> :

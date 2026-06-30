@@ -114,6 +114,13 @@ SELECT
        OR full_method LIKE '%AssistantService.Assist') AS chat_turns,
   COUNTIF(full_method LIKE '%AssistantService.AsyncAssist'
        OR full_method LIKE '%AssistantService.ReadAsyncAssist') AS deep_research_calls,
+  -- NotebookLM (CRUD + sources + audio overviews), all under notebooklm.v1alpha namespace
+  COUNTIF(full_method LIKE '%notebooklm.v1alpha.NotebookService.%') AS notebooklm_notebook_ops,
+  COUNTIF(full_method LIKE '%notebooklm.v1alpha.SourceService.%') AS notebooklm_source_ops,
+  COUNTIF(full_method LIKE '%notebooklm.v1alpha.AudioOverviewService.%') AS notebooklm_audio_ops,
+  -- A2A agent invocation (marketplace agents + custom agents via A2A protocol)
+  COUNTIF(full_method LIKE '%assistants.agents.a2a.v1.message.%'
+       OR full_method LIKE '%assistants.agents.a2a.v1.tasks.%') AS a2a_invocations,
   COUNTIF(full_method LIKE '%CompletionService.%Complete%') AS autocomplete_calls,
   COUNTIF(full_method LIKE '%ConversationalSearchService.%') AS session_ops,
   COUNTIF(full_method LIKE '%UserEventService.%') AS feedback_events,
@@ -126,7 +133,9 @@ SELECT
       AND full_method NOT LIKE '%ConversationalSearchService.%'
       AND full_method NOT LIKE '%UserEventService.%'
       AND full_method NOT LIKE '%SearchService.%'
-      AND full_method NOT LIKE '%CannedQueryService.%') AS other,
+      AND full_method NOT LIKE '%CannedQueryService.%'
+      AND full_method NOT LIKE '%notebooklm.v1alpha.%'
+      AND full_method NOT LIKE '%assistants.agents.a2a.v1.%') AS other,
   COUNT(*) AS total_data_access,
   MIN(timestamp) AS first_access,
   MAX(timestamp) AS last_access
@@ -384,3 +393,76 @@ SELECT
 FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
 WHERE jsonPayload.useriamprincipal IS NOT NULL
 GROUP BY d ORDER BY d DESC;
+
+-- ---------------------------------------------------------------
+-- v_agentspace_navigation — which GE "page" / agent did users open?
+-- Source: UserEventService.WriteUserEvent with userevent.agentspaceinfo.
+-- This is NAVIGATION not invocation — captures users opening Deep Research /
+-- NotebookLM / custom agent detail pages.
+-- Page types observed: home, agent_gallery, agent, deep-research, notebook-lm
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_agentspace_navigation` AS
+WITH base AS (
+  SELECT
+    timestamp,
+    jsonPayload.useriamprincipal AS actor_email,
+    jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype AS page_type,
+    jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid AS agent_id,
+    jsonPayload.request.userevent.agentspaceinfo.agentinfo.name AS agent_name,
+    REGEXP_EXTRACT(jsonPayload.request.userevent.engine, r'/engines/([^/]+)$') AS engine_id_raw
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NULL
+    AND jsonPayload.useriamprincipal IS NOT NULL
+)
+SELECT
+  b.actor_email,
+  CASE
+    WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  b.page_type,
+  b.agent_id,
+  b.agent_name,
+  b.engine_id_raw,
+  em.display_name AS engine_display_name,
+  COUNT(*) AS visits,
+  MIN(b.timestamp) AS first_visit,
+  MAX(b.timestamp) AS last_visit
+FROM base b
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em
+  ON b.engine_id_raw = em.engine_id
+GROUP BY b.actor_email, b.page_type, b.agent_id, b.agent_name, b.engine_id_raw, em.display_name
+ORDER BY visits DESC;
+
+-- ---------------------------------------------------------------
+-- v_agentspace_navigation_summary — per-user pivot
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_agentspace_navigation_summary` AS
+SELECT
+  jsonPayload.useriamprincipal AS actor_email,
+  CASE
+    WHEN jsonPayload.useriamprincipal LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN jsonPayload.useriamprincipal LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN jsonPayload.useriamprincipal LIKE '%@%' AND jsonPayload.useriamprincipal NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  COUNTIF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'home') AS home_visits,
+  COUNTIF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent_gallery') AS gallery_visits,
+  COUNTIF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'deep-research') AS deep_research_visits,
+  COUNTIF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'notebook-lm') AS notebooklm_visits,
+  COUNTIF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent') AS custom_agent_visits,
+  COUNT(DISTINCT IF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent',
+                    jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid, NULL)) AS distinct_custom_agents,
+  STRING_AGG(DISTINCT
+    IF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent',
+       jsonPayload.request.userevent.agentspaceinfo.agentinfo.name, NULL),
+    ', ') AS custom_agent_names,
+  COUNT(*) AS total_navigation_events,
+  MAX(timestamp) AS last_visit
+FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+WHERE jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NULL
+  AND jsonPayload.useriamprincipal IS NOT NULL
+GROUP BY actor_email, origin
+ORDER BY total_navigation_events DESC;

@@ -177,16 +177,46 @@ See `docs/GE_CONSOLE_SETUP.md` for screenshots.
    GE web UI). To see actual research content, use the Deep Research task list in the GE admin
    console.
 
-4. **Create events lack resource ID**: `CreateAgent` audit log's `resourceName` is the
+   See also `v_agentspace_navigation_summary.deep_research_visits` — counts how many times
+   each user *opened the Deep Research page*, independent of whether they actually submitted
+   a research task.
+
+4. **NotebookLM Enterprise**: methods live under the namespace
+   `google.cloud.notebooklm.v1alpha.{NotebookService,SourceService,AudioOverviewService}`,
+   inside `serviceName="discoveryengine.googleapis.com"` (no separate `notebooklm.googleapis.com`).
+   The dashboard buckets them in `v_data_access_summary.notebooklm_{notebook,source,audio}_ops`.
+   "User opened the NotebookLM home page" is also captured separately as
+   `v_agentspace_navigation_summary.notebooklm_visits`.
+
+5. **A2A agent invocation**: marketplace agents (Microsoft 365 / Salesforce / Jira) and
+   custom agents invoked via the A2A protocol go through
+   `assistants.agents.a2a.v1.{message,tasks}.*`. Bucketed as
+   `v_data_access_summary.a2a_invocations`. The specific agent ID is in `resourceName`
+   (parse from `…/assistants/*/agents/<AGENT_ID>/…`) — currently not surfaced as a separate
+   per-agent breakdown.
+
+6. **Other special agents (Idea Generation, Co-Scientist, AlphaEvolve)**: these flow through
+   `AssistantService.StreamAssist` and are **NOT distinguishable from regular chat** at the
+   audit-log method-name level. The agent reference is in the request body (`request.agentsConfig`
+   or similar). To break them out you'd need to enable DATA_WRITE audit logging with request
+   payload capture — not done by default.
+
+7. **Custom user-built agents — view-only navigation**: when a user clicks into a custom
+   agent's detail page in GE, we capture `agentinfo.{agentid, name}` via
+   `v_agentspace_navigation` (the GE web UI emits a WriteUserEvent). That tells us *who opened
+   which agent*, but not whether they actually invoked it. Actual invocation either goes
+   through StreamAssist (lumped with chat) or A2A (counted in `a2a_invocations`).
+
+8. **Create events lack resource ID**: `CreateAgent` audit log's `resourceName` is the
    parent (`assistants/default_assistant`), not the new agent's ID. So per-actor "alive
    resources" can't be attributed back to who created what. The Overview page shows a
    system-wide alive count via direct `ListAgents` API.
 
-5. **PII in prompts**: `v_conversations` applies regex redaction for emails, phone numbers,
+9. **PII in prompts**: `v_conversations` applies regex redaction for emails, phone numbers,
    ID-like numbers, and credit-card-like numbers. **It is not a full DLP** — long-form PII
    (names, addresses) is NOT redacted. For production: layer Cloud DLP API on top.
 
-6. **No public GE seat/license API**: "purchased seats" is a manual config value in
+10. **No public GE seat/license API**: "purchased seats" is a manual config value in
    `quota_config` table. "Claimed" derived from distinct active actors in 30 days.
 
 ---
