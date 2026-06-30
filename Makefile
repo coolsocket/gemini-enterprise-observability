@@ -1,4 +1,4 @@
-.PHONY: install web-install web-build api-run serve dev tunnel-info \
+.PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
         tf-init tf-plan tf-apply views bootstrap image deploy all clean
 
 PY ?= python3
@@ -8,9 +8,14 @@ PORT ?= 8000
 # ============================================================
 # Local development
 # ============================================================
-install: web-install
-	$(PY) -m venv $(VENV)
-	$(VENV)/bin/pip install -q -r apps/api/requirements.txt
+install: web-install py-deps
+
+# Python venv only (used by deploy chain; no node needed)
+py-deps:
+	@if [ ! -x $(VENV)/bin/python3 ]; then \
+	  echo "→ creating venv + installing python deps"; \
+	  $(PY) -m venv $(VENV) && $(VENV)/bin/pip install -q -r apps/api/requirements.txt; \
+	fi
 
 web-install:
 	cd apps/web && npm install --silent --no-audit --no-fund
@@ -68,19 +73,16 @@ tf-apply: tf-init
 image: check-project
 	gcloud builds submit --project=$(PROJECT) --tag=$(IMAGE) .
 
-# Step 4: apply BQ views (renders {{PROJECT}}/{{DATASET}} placeholders)
-# Uses venv python if available, otherwise system python3
-views: check-project
-	@if [ -x $(VENV)/bin/python3 ]; then PY=$(VENV)/bin/python3; else PY=$(PY); fi; \
-	PROJECT=$(PROJECT) DATASET=$(DATASET) $$PY infra/scripts/apply_views.py
+# Step 4: apply BQ views (renders {{PROJECT}}/{{DATASET}}/{{SIM_PATTERN}} placeholders)
+views: check-project py-deps
+	PROJECT=$(PROJECT) DATASET=$(DATASET) $(VENV)/bin/python3 infra/scripts/apply_views.py
 
 # Step 5: ingest engine_metadata + resources_alive + seed quota_config
-bootstrap: check-project
-	@if [ -x $(VENV)/bin/python3 ]; then PY=$(VENV)/bin/python3; else PY=$(PY); fi; \
-	PROJECT=$(PROJECT) DATASET=$(DATASET) $$PY infra/scripts/bootstrap.py
+bootstrap: check-project py-deps
+	PROJECT=$(PROJECT) DATASET=$(DATASET) $(VENV)/bin/python3 infra/scripts/bootstrap.py
 
 # Step 6: deploy = all of the above in order (after GE admin toggles done)
-deploy: tf-apply image views bootstrap
+deploy: py-deps tf-apply image views bootstrap
 	@echo ""
 	@echo "✓ Deployment complete. Service URL:"
 	@cd terraform && terraform output -raw service_url
