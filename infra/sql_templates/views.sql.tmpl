@@ -11,7 +11,7 @@ CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_admin_activity` AS
 WITH base AS (
   SELECT
     timestamp,
-    protopayload_auditlog.authenticationInfo.principalEmail AS actor_email,
+    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^vivo-sim-', 'demo-') AS actor_email,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+)$') AS action,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+Service)\.') AS service,
     REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/([a-zA-Z]+)/[^/]+$') AS resource_type,
@@ -72,7 +72,7 @@ CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_data_access` AS
 WITH base AS (
   SELECT
     timestamp,
-    protopayload_auditlog.authenticationInfo.principalEmail AS actor_email,
+    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^vivo-sim-', 'demo-') AS actor_email,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+)$') AS action,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+Service)\.') AS service,
     REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/engines/([^/]+)') AS engine_id_raw,
@@ -165,7 +165,7 @@ WITH base AS (
   SELECT
     timestamp,
     trace AS trace_id,
-    jsonPayload.useriamprincipal AS actor_email,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
     REGEXP_EXTRACT(jsonPayload.logmetadata.name, r'/engines/([^/]+)') AS engine_id_raw,
     (SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt_raw,
     REGEXP_EXTRACT(jsonPayload.response.answer.name, r'sessions/([^/]+)') AS session_id,
@@ -265,13 +265,13 @@ LEFT JOIN `{{PROJECT}}.{{DATASET}}.v_choices_agg` ca
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_user_usage` AS
 WITH ua AS (
   SELECT
-    jsonPayload.useriamprincipal AS actor_email,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
     REGEXP_EXTRACT(jsonPayload.logmetadata.name, r'/engines/([^/]+)') AS engine_id_raw,
     timestamp,
     jsonPayload.logmetadata.methodname AS method,
     REGEXP_EXTRACT(TO_JSON_STRING(jsonPayload.response), r'sessions/([^"\\\/]+)') AS session_id
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
-  WHERE jsonPayload.useriamprincipal IS NOT NULL
+  WHERE REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') IS NOT NULL
 )
 SELECT
   ua.actor_email,
@@ -357,7 +357,7 @@ CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_engine_adoption` AS
 WITH base AS (
   SELECT
     REGEXP_EXTRACT(jsonPayload.logmetadata.name, r'/engines/([^/]+)') AS engine_id,
-    jsonPayload.useriamprincipal AS actor_email,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
     jsonPayload.logmetadata.methodname AS method,
     REGEXP_EXTRACT(TO_JSON_STRING(jsonPayload.response), r'sessions/([^"\\\/]+)') AS session_id
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
@@ -380,16 +380,16 @@ ORDER BY total_events DESC;
 -- ---------------------------------------------------------------
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_zero_use_seats` AS
 WITH all_users AS (
-  SELECT jsonPayload.useriamprincipal AS user_id, MIN(timestamp) AS first_seen
+  SELECT REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS user_id, MIN(timestamp) AS first_seen
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
-  WHERE jsonPayload.useriamprincipal IS NOT NULL
+  WHERE REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') IS NOT NULL
   GROUP BY user_id
 ),
 recent AS (
-  SELECT DISTINCT jsonPayload.useriamprincipal AS user_id
+  SELECT DISTINCT REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS user_id
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
   WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
-    AND jsonPayload.useriamprincipal IS NOT NULL
+    AND REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') IS NOT NULL
 )
 SELECT a.user_id, a.first_seen, TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), a.first_seen, DAY) AS days_since_first_seen
 FROM all_users a
@@ -400,11 +400,11 @@ ORDER BY a.first_seen ASC;
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_dau` AS
 SELECT
   DATE(timestamp) AS d,
-  COUNT(DISTINCT jsonPayload.useriamprincipal) AS dau,
+  COUNT(DISTINCT REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-')) AS dau,
   COUNT(*) AS total_events,
   COUNTIF(jsonPayload.logmetadata.methodname = 'StreamAssist') AS chat_turns
 FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
-WHERE jsonPayload.useriamprincipal IS NOT NULL
+WHERE REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') IS NOT NULL
 GROUP BY d ORDER BY d DESC;
 
 -- ---------------------------------------------------------------
@@ -418,14 +418,14 @@ CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_agentspace_navigation` AS
 WITH base AS (
   SELECT
     timestamp,
-    jsonPayload.useriamprincipal AS actor_email,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
     jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype AS page_type,
     jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid AS agent_id,
     jsonPayload.request.userevent.agentspaceinfo.agentinfo.name AS agent_name,
     REGEXP_EXTRACT(jsonPayload.request.userevent.engine, r'/engines/([^/]+)$') AS engine_id_raw
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
   WHERE jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NULL
-    AND jsonPayload.useriamprincipal IS NOT NULL
+    AND REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') IS NOT NULL
 )
 SELECT
   b.actor_email,
@@ -454,11 +454,11 @@ ORDER BY visits DESC;
 -- ---------------------------------------------------------------
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_agentspace_navigation_summary` AS
 SELECT
-  jsonPayload.useriamprincipal AS actor_email,
+  REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
   CASE
-    WHEN jsonPayload.useriamprincipal LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
-    WHEN jsonPayload.useriamprincipal LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
-    WHEN jsonPayload.useriamprincipal LIKE '%@%' AND jsonPayload.useriamprincipal NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') LIKE '%@%' AND REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
   COUNTIF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'home') AS home_visits,
@@ -476,7 +476,7 @@ SELECT
   MAX(timestamp) AS last_visit
 FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
 WHERE jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NULL
-  AND jsonPayload.useriamprincipal IS NOT NULL
+  AND REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') IS NOT NULL
 GROUP BY actor_email, origin
 ORDER BY total_navigation_events DESC;
 
