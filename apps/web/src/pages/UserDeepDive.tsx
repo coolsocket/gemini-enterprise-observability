@@ -26,22 +26,20 @@ const PERSONA_TAG: Record<string, string> = {
 // ============================================================
 // User picker (landing) — searchable, sortable, filterable directory
 // ============================================================
-type SortKey = "total" | "chat" | "dr" | "nb" | "agents" | "last";
+type SortKey = "last" | "chat" | "dr" | "nb" | "agents";
 const SORT_LABELS: Record<SortKey, string> = {
-  total:  "总活动",
+  last:   "最近活动",
   chat:   "Chat",
   dr:     "Deep Research",
   nb:     "NotebookLM",
   agents: "Custom agent 访问",
-  last:   "最近活动",
 };
 const SORT_FNS: Record<SortKey, (u: import("../api").UserListEntry) => number> = {
-  total:  u => u.total_data_access,
+  last:   u => u.last_access ? new Date(u.last_access).getTime() : 0,
   chat:   u => u.chat_turns,
   dr:     u => u.deep_research_calls,
   nb:     u => u.notebooklm_ops,
   agents: u => u.custom_agent_visits,
-  last:   u => u.last_access ? new Date(u.last_access).getTime() : 0,
 };
 
 const ORIGIN_FILTERS: Array<{ key: "ALL" | "HUMAN" | "SIMULATED" | "AUTOMATION"; label: string; cls: string }> = [
@@ -83,7 +81,7 @@ function Picker() {
   const navigate = useNavigate();
   const users = useQuery({ queryKey: ["users"], queryFn: () => api.users() });
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<SortKey>("total");
+  const [sortBy, setSortBy] = useState<SortKey>("last");
   const [originFilter, setOriginFilter] = useState<"ALL" | "HUMAN" | "SIMULATED" | "AUTOMATION">("ALL");
 
   if (!users.data) return <EmptyState title="加载用户列表…" />;
@@ -92,7 +90,6 @@ function Picker() {
     .filter(u => originFilter === "ALL" || u.origin === originFilter)
     .filter(u => !search || u.actor_email.toLowerCase().includes(search.toLowerCase()) || (u.persona ?? "").toLowerCase().includes(search.toLowerCase()));
   const sorted = [...filtered].sort((a, b) => SORT_FNS[sortBy](b) - SORT_FNS[sortBy](a));
-  const maxTotal = Math.max(1, ...sorted.map(u => u.total_data_access));
 
   return (
     <div className="space-y-4 max-w-[1200px]">
@@ -144,7 +141,6 @@ function Picker() {
             <span className="w-10 text-right" title="REST Search">🔎</span>
             <span className="w-10 text-right" title="Files">📎</span>
           </div>
-          <div className="w-16 text-right shrink-0">活动</div>
           <div className="w-14 text-right shrink-0">最近</div>
         </div>
 
@@ -153,63 +149,52 @@ function Picker() {
           <EmptyState title="没匹配项" hint="改改 search 或 filter" />
         ) : (
           <div>
-            {sorted.map(u => {
-              const pct = (u.total_data_access / maxTotal) * 100;
-              return (
-                <button
-                  key={u.actor_email}
-                  onClick={() => navigate(`/user/${encodeURIComponent(u.actor_email)}`)}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-xs text-left border-b border-border-subtle/20 hover:bg-info-bg/8 hover:border-info/30 transition-colors group"
-                >
-                  {/* Email + origin */}
-                  <div className="flex-1 min-w-0 flex items-center gap-2">
-                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
-                      u.origin === "HUMAN" ? "bg-ggreen" :
-                      u.origin === "SIMULATED" ? "bg-info" :
-                      u.origin === "AUTOMATION" ? "bg-warn" : "bg-ink-muted"
-                    }`} />
-                    <span className="font-mono text-ink-primary group-hover:text-info truncate" title={u.actor_email}>
-                      {shortenEmail(u.actor_email)}
+            {sorted.map(u => (
+              <button
+                key={u.actor_email}
+                onClick={() => navigate(`/user/${encodeURIComponent(u.actor_email)}`)}
+                className="w-full flex items-center gap-3 px-3 py-2 text-xs text-left border-b border-border-subtle/20 hover:bg-info-bg/8 hover:border-info/30 transition-colors group"
+              >
+                {/* Email + origin */}
+                <div className="flex-1 min-w-0 flex items-center gap-2">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+                    u.origin === "HUMAN" ? "bg-ggreen" :
+                    u.origin === "SIMULATED" ? "bg-info" :
+                    u.origin === "AUTOMATION" ? "bg-warn" : "bg-ink-muted"
+                  }`} />
+                  <span className="font-mono text-ink-primary group-hover:text-info truncate" title={u.actor_email}>
+                    {shortenEmail(u.actor_email)}
+                  </span>
+                  {u.engines_touched > 1 && (
+                    <span className="text-[9px] text-ink-muted ml-1 shrink-0">×{u.engines_touched} eng</span>
+                  )}
+                </div>
+
+                {/* Persona tag */}
+                <div className="w-20 shrink-0">
+                  {u.persona ? (
+                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${PERSONA_TAG[u.persona] ?? PERSONA_TAG.LURKER}`}>
+                      {u.persona.replace("_", " ")}
                     </span>
-                    {u.engines_touched > 1 && (
-                      <span className="text-[9px] text-ink-muted ml-1 shrink-0">×{u.engines_touched} eng</span>
-                    )}
-                  </div>
+                  ) : <span className="text-ink-muted">—</span>}
+                </div>
 
-                  {/* Persona tag */}
-                  <div className="w-20 shrink-0">
-                    {u.persona ? (
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${PERSONA_TAG[u.persona] ?? PERSONA_TAG.LURKER}`}>
-                        {u.persona.replace("_", " ")}
-                      </span>
-                    ) : <span className="text-ink-muted">—</span>}
-                  </div>
+                {/* Feature usage pills (hidden on small) */}
+                <div className="hidden lg:flex items-center gap-1 shrink-0">
+                  <FeaturePill icon="💬" value={u.chat_turns} color="text-ggreen" />
+                  <FeaturePill icon="🔬" value={u.deep_research_calls} color="text-info" />
+                  <FeaturePill icon="📓" value={u.notebooklm_ops} color="text-gblue" />
+                  <FeaturePill icon="🧩" value={u.custom_agent_visits} color="text-ggreen" />
+                  <FeaturePill icon="🔎" value={u.programmatic_searches} color="text-gblue" />
+                  <FeaturePill icon="📎" value={u.session_files} color="text-ink-secondary" />
+                </div>
 
-                  {/* Feature usage pills (hidden on small) */}
-                  <div className="hidden lg:flex items-center gap-1 shrink-0">
-                    <FeaturePill icon="💬" value={u.chat_turns} color="text-ggreen" />
-                    <FeaturePill icon="🔬" value={u.deep_research_calls} color="text-info" />
-                    <FeaturePill icon="📓" value={u.notebooklm_ops} color="text-gblue" />
-                    <FeaturePill icon="🧩" value={u.custom_agent_visits} color="text-ggreen" />
-                    <FeaturePill icon="🔎" value={u.programmatic_searches} color="text-gblue" />
-                    <FeaturePill icon="📎" value={u.session_files} color="text-ink-secondary" />
-                  </div>
-
-                  {/* Total activity bar + number */}
-                  <div className="w-16 shrink-0 flex items-center gap-1.5">
-                    <div className="flex-1 h-1 rounded-full bg-subtle overflow-hidden">
-                      <div className="h-full bg-info/50" style={{ width: `${pct}%` }} />
-                    </div>
-                    <span className="tabular-nums text-ink-primary font-medium w-7 text-right">{u.total_data_access}</span>
-                  </div>
-
-                  {/* Last seen */}
-                  <div className="w-14 text-right shrink-0 text-[10px] text-ink-muted font-mono">
-                    {relTs(u.last_access)}
-                  </div>
-                </button>
-              );
-            })}
+                {/* Last seen */}
+                <div className="w-14 text-right shrink-0 text-[10px] text-ink-muted font-mono">
+                  {relTs(u.last_access)}
+                </div>
+              </button>
+            ))}
           </div>
         )}
 
