@@ -1,16 +1,63 @@
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, QuotaOverview } from "../api";
 import { Panel, EmptyState } from "../components/Card";
 import { fmtTs } from "../components/DataTable";
 
+// Inline editable number cell — click to edit, Enter/blur to save, Esc to cancel
+function EditableNumber({ value, onSave, saving, accent }: {
+  value: string | number;
+  onSave: (v: string) => void;
+  saving?: boolean;
+  accent?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing) inputRef.current?.select(); }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    if (draft !== String(value) && draft.trim() !== "") onSave(draft.trim());
+    else setDraft(String(value));
+  };
+  const cancel = () => { setEditing(false); setDraft(String(value)); };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") cancel();
+        }}
+        className="w-16 h-6 px-1.5 rounded bg-info-bg/10 border border-info/60 text-info text-right tabular-nums focus:outline-none"
+      />
+    );
+  }
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      disabled={saving}
+      className={`px-1.5 h-6 rounded tabular-nums ${accent ?? "text-ink-secondary"} hover:bg-subtle hover:ring-1 hover:ring-info/40 ${saving ? "opacity-50 animate-pulse" : ""}`}
+      title="点击编辑"
+    >
+      {value}
+    </button>
+  );
+}
+
 const FEATURE_META: Record<string, { label: string; icon: string; color: string; hint: string }> = {
   chat:          { label: "Chat", icon: "💬", color: "text-ggreen", hint: "Google 助理查询 · StreamAssist" },
   deep_research: { label: "Deep Research", icon: "🔬", color: "text-info",   hint: "AsyncAssist 提交次数" },
   agent_create:  { label: "Agent 创建", icon: "🔧", color: "text-gyellow", hint: "无代码 agent builder" },
-  video_gen:     { label: "视频生成",   icon: "🎬", color: "text-gred",  hint: "待观察 - 现有数据里未捕获 imagen/veo 调用" },
-  image_gen:     { label: "图片生成",   icon: "🖼️",  color: "text-gred",  hint: "待观察 - 同上" },
+  video_gen:     { label: "视频生成",   icon: "🎬", color: "text-gred",  hint: "启发式 - GE 后端不 emit audit log, 用 StreamAssist prompt 关键词匹配" },
+  image_gen:     { label: "图片生成",   icon: "🖼️",  color: "text-gred",  hint: "启发式 - 同上, 关键词如'生成一只青蛙'" },
   idea_gen:      { label: "Idea Generation", icon: "💡", color: "text-gblue", hint: "启发式 · GE 走 StreamAssist 混不出来" },
 };
 const FEATURE_ORDER = ["chat", "deep_research", "agent_create", "video_gen", "image_gen", "idea_gen"];
@@ -75,6 +122,10 @@ export default function Quota() {
   const setTier = useMutation({
     mutationFn: ({ email, tier }: { email: string; tier: "standard" | "plus" }) =>
       api.quotaSetTier(email, tier),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quota-overview"] }),
+  });
+  const setConfig = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) => api.quotaSet(key, value),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["quota-overview"] }),
   });
   const [filter, setFilter] = useState<"all" | "over" | "active">("active");
@@ -244,18 +295,25 @@ export default function Quota() {
         )}
       </Panel>
 
-      {/* Tier schedule reference */}
-      <Panel title="Tier 阈值配置">
+      {/* Tier schedule — editable */}
+      <Panel
+        title="Tier 阈值配置"
+        action={
+          <span className="text-[10px] text-ink-muted">
+            {setConfig.isPending ? "保存中…" : "点数字直接编辑 · Enter 保存"}
+          </span>
+        }
+      >
         <div className="text-[10px] text-ink-muted mb-3">
-          从 <code className="bg-subtle px-1 rounded">quota_config</code> 表读；每天加州 0 点重置。改数字直接改 BQ 表即可 (or 通过 <code className="bg-subtle px-1 rounded">POST /api/quota/config</code>)
+          每天加州 0 点重置。改动立即写入 <code className="bg-subtle px-1 rounded">quota_config</code>，utilization 会自动重算。
         </div>
         <table className="w-full text-xs">
           <thead>
             <tr className="text-left text-ink-muted border-b border-border-subtle/40">
-              <th className="py-1 pr-3 font-normal">Feature</th>
-              <th className="py-1 pr-3 font-normal text-right">Standard 每日</th>
-              <th className="py-1 pr-3 font-normal text-right">Plus 每日</th>
-              <th className="py-1 pr-3 font-normal">注</th>
+              <th className="py-1.5 pr-3 font-normal">Feature</th>
+              <th className="py-1.5 pr-3 font-normal text-right w-24">Standard</th>
+              <th className="py-1.5 pr-3 font-normal text-right w-24">Plus</th>
+              <th className="py-1.5 pr-3 font-normal">说明</th>
             </tr>
           </thead>
           <tbody>
@@ -264,27 +322,88 @@ export default function Quota() {
               const plus = d.config.find(c => c.key === `tier.plus.${f}_daily`)?.value ?? "—";
               const meta = FEATURE_META[f];
               return (
-                <tr key={f} className="border-b border-border-subtle/20">
+                <tr key={f} className="border-b border-border-subtle/20 hover:bg-subtle/20">
                   <td className="py-1 pr-3">{meta.icon} {meta.label}</td>
-                  <td className="py-1 pr-3 text-right tabular-nums text-ink-secondary">{std}</td>
-                  <td className="py-1 pr-3 text-right tabular-nums text-info font-medium">{plus}</td>
+                  <td className="py-1 pr-3 text-right">
+                    <EditableNumber
+                      value={std}
+                      accent="text-ink-secondary"
+                      onSave={v => setConfig.mutate({ key: `tier.standard.${f}_daily`, value: v })}
+                      saving={setConfig.isPending && setConfig.variables?.key === `tier.standard.${f}_daily`}
+                    />
+                  </td>
+                  <td className="py-1 pr-3 text-right">
+                    <EditableNumber
+                      value={plus}
+                      accent="text-info font-medium"
+                      onSave={v => setConfig.mutate({ key: `tier.plus.${f}_daily`, value: v })}
+                      saving={setConfig.isPending && setConfig.variables?.key === `tier.plus.${f}_daily`}
+                    />
+                  </td>
                   <td className="py-1 pr-3 text-[10px] text-ink-muted">{meta.hint}</td>
                 </tr>
               );
             })}
             {/* Storage — not daily, one-time */}
-            <tr className="border-b border-border-subtle/20">
+            <tr className="border-b border-border-subtle/20 hover:bg-subtle/20">
               <td className="py-1 pr-3">💾 存储 (GiB)</td>
-              <td className="py-1 pr-3 text-right tabular-nums text-ink-secondary">
-                {d.config.find(c => c.key === "tier.standard.storage_gib")?.value ?? "—"}
+              <td className="py-1 pr-3 text-right">
+                <EditableNumber
+                  value={d.config.find(c => c.key === "tier.standard.storage_gib")?.value ?? "0"}
+                  accent="text-ink-secondary"
+                  onSave={v => setConfig.mutate({ key: "tier.standard.storage_gib", value: v })}
+                  saving={setConfig.isPending && setConfig.variables?.key === "tier.standard.storage_gib"}
+                />
               </td>
-              <td className="py-1 pr-3 text-right tabular-nums text-info font-medium">
-                {d.config.find(c => c.key === "tier.plus.storage_gib")?.value ?? "—"}
+              <td className="py-1 pr-3 text-right">
+                <EditableNumber
+                  value={d.config.find(c => c.key === "tier.plus.storage_gib")?.value ?? "0"}
+                  accent="text-info font-medium"
+                  onSave={v => setConfig.mutate({ key: "tier.plus.storage_gib", value: v })}
+                  saving={setConfig.isPending && setConfig.variables?.key === "tier.plus.storage_gib"}
+                />
               </td>
-              <td className="py-1 pr-3 text-[10px] text-ink-muted">Data store 总大小 (未接入 · TODO: 调 dataStore.list API)</td>
+              <td className="py-1 pr-3 text-[10px] text-ink-muted">Data store 总大小 (未接入 · TODO)</td>
             </tr>
           </tbody>
         </table>
+
+        {/* Bulk actions row */}
+        <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border-subtle/40">
+          <span className="text-[11px] text-ink-muted mr-2">批量:</span>
+          <button
+            onClick={() => {
+              if (!confirm("把所有 10 个用户改成 plus tier?")) return;
+              d.tiers.forEach(t => setTier.mutate({ email: t.actor_email, tier: "plus" }));
+            }}
+            className="h-7 px-2.5 rounded text-[11px] bg-info/10 text-info border border-info/30 hover:bg-info/20"
+          >
+            全部改 Plus
+          </button>
+          <button
+            onClick={() => {
+              if (!confirm("把所有 10 个用户改成 standard tier?")) return;
+              d.tiers.forEach(t => setTier.mutate({ email: t.actor_email, tier: "standard" }));
+            }}
+            className="h-7 px-2.5 rounded text-[11px] bg-subtle text-ink-secondary border border-border-subtle hover:bg-ink-muted/20"
+          >
+            全部改 Standard
+          </button>
+          <span className="text-[10px] text-ink-muted ml-auto">
+            {setTier.isPending ? "保存中…" : `默认新用户 tier: ${d.config.find(c => c.key === "quota.default_tier")?.value ?? "?"}`}
+          </span>
+          {!setTier.isPending && (
+            <button
+              onClick={() => {
+                const v = d.config.find(c => c.key === "quota.default_tier")?.value === "plus" ? "standard" : "plus";
+                setConfig.mutate({ key: "quota.default_tier", value: v });
+              }}
+              className="text-[10px] text-info hover:underline"
+            >
+              切换默认
+            </button>
+          )}
+        </div>
       </Panel>
 
       {/* Tier assignments raw */}

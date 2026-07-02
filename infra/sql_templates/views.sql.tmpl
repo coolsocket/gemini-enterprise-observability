@@ -738,15 +738,47 @@ combined AS (
   FROM audit WHERE method LIKE '%assistants.agents.a2a.v1.%'
   GROUP BY d, actor_email
   UNION ALL
-  -- video_gen: aiplatform imagen/veo models (placeholder — no data yet)
+  -- video_gen: (a) aiplatform veo audit events if any, PLUS (b) prompt-intent
+  -- heuristic: StreamAssist prompts asking for a video. GE image/video generation
+  -- backend runs inside Google's infra and does NOT emit customer audit logs,
+  -- so intent-detection from the user's prompt is the best signal we have.
   SELECT d, actor_email, 'video_gen' AS feature, COUNT(*) AS n
   FROM audit WHERE service = 'aiplatform.googleapis.com'
     AND (LOWER(method) LIKE '%veo%' OR LOWER(method) LIKE '%videogeneration%')
   GROUP BY d, actor_email
   UNION ALL
+  SELECT
+    DATE(timestamp, 'America/Los_Angeles') AS d,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
+    'video_gen' AS feature,
+    COUNT(*) AS n
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.logmetadata.methodname = 'StreamAssist'
+    AND REGEXP_CONTAINS(
+      ARRAY_TO_STRING(ARRAY(SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL), ' '),
+      r'(?i)(生成|画|绘制|制作|做一?[个只段]|来一?[个只段]|generate|make|create|draw|render)[^\n]{0,15}(视频|video|电影|movie|clip|片段|动画)'
+    )
+    AND jsonPayload.useriamprincipal IS NOT NULL
+  GROUP BY d, actor_email
+  UNION ALL
+  -- image_gen: aiplatform imagen events + prompt-intent heuristic
   SELECT d, actor_email, 'image_gen' AS feature, COUNT(*) AS n
   FROM audit WHERE service = 'aiplatform.googleapis.com'
     AND (LOWER(method) LIKE '%imagen%' OR LOWER(method) LIKE '%imagegeneration%')
+  GROUP BY d, actor_email
+  UNION ALL
+  SELECT
+    DATE(timestamp, 'America/Los_Angeles') AS d,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
+    'image_gen' AS feature,
+    COUNT(*) AS n
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.logmetadata.methodname = 'StreamAssist'
+    AND REGEXP_CONTAINS(
+      ARRAY_TO_STRING(ARRAY(SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL), ' '),
+      r'(?i)(生成|画|绘制|来一?[张幅副个只]|generate|draw|create|render|make)[^\n]{0,20}(图|picture|image|photo|头像|封面|logo|海报|插画|帅哥|美女|风景|动物|青蛙|猫|狗|人物|漫画|卡通|贴纸|表情|图标|icon|头像)'
+    )
+    AND jsonPayload.useriamprincipal IS NOT NULL
   GROUP BY d, actor_email
   UNION ALL
   -- agent_create: AgentService.CreateAgent (from admin_activity)
