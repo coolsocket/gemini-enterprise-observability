@@ -50,6 +50,8 @@ VIEWS: dict[str, dict[str, str]] = {
     "v_agentspace_navigation":          {"label": "Agentspace 入口浏览",  "desc": "用户打开了哪个 special agent / NotebookLM / Deep Research 页面"},
     "v_agentspace_navigation_summary":  {"label": "Agentspace 入口汇总",  "desc": "按用户 pivot：home / gallery / deep-research / notebook-lm / custom agent 访问次数"},
     "v_agent_directory":                {"label": "Agent 目录",          "desc": "每个 agent 一行：built-in (Deep Research / NotebookLM / A2A) + custom"},
+    "v_deep_research_prompts":          {"label": "Deep Research prompts", "desc": "AsyncAssist 事件反推的 prompt (±60s 时间窗)"},
+    "v_custom_agent_prompts":           {"label": "Custom agent prompts",  "desc": "agent 页打开后 5min 内的 StreamAssist 归到该 agent"},
 }
 
 # Views that have an `origin` column — supports ?origin= filter
@@ -58,6 +60,7 @@ VIEWS_WITH_ORIGIN: set[str] = {
     "v_admin_activity", "v_builders", "v_data_access",
     "v_data_access_summary", "v_user_usage", "v_session_files",
     "v_agentspace_navigation", "v_agentspace_navigation_summary",
+    "v_deep_research_prompts", "v_custom_agent_prompts",
 }
 
 # Snapshot table name (s_*) corresponds to each view (v_*)
@@ -261,7 +264,7 @@ def agent_deep_dive(agent_id: str) -> JSONResponse:
         events_sql = f"""
         SELECT timestamp,
                'OpenAgent' AS action,
-               jsonPayload.useriamprincipal AS actor_email,
+               REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
                jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid AS agent_id
         FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
         WHERE jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid = @aid
@@ -271,6 +274,26 @@ def agent_deep_dive(agent_id: str) -> JSONResponse:
     users = with_param(per_user_sql)
     events = with_param(events_sql)
 
+    # Pull reverse-attributed prompts (Deep Research uses different view; custom agent has its own)
+    if agent_id == "deep_research":
+        prompts = [_json_safe(dict(r)) for r in _bq.query(
+            f"""SELECT dr_ts AS event_ts, dr_action, actor_email, attributed_prompt AS prompt,
+                       attribution_delta_sec, engine_display_name
+                FROM `{PROJECT}.{DATASET}.v_deep_research_prompts`
+                WHERE attributed_prompt IS NOT NULL
+                ORDER BY dr_ts DESC LIMIT 100"""
+        ).result()]
+    elif agent_id in ("notebooklm", "a2a_protocol"):
+        prompts = []  # NotebookLM/A2A don't emit prompt-adjacent StreamAssist
+    else:
+        # Custom agent
+        prompts = with_param(f"""
+            SELECT prompt_ts AS event_ts, actor_email, prompt, elapsed_since_open_sec, engine_display_name, agent_open_ts
+            FROM `{PROJECT}.{DATASET}.v_custom_agent_prompts`
+            WHERE agent_id = @aid
+            ORDER BY prompt_ts DESC LIMIT 100
+        """)
+
     # Pull the directory row for the agent header
     dir_row = with_param(f"SELECT * FROM `{PROJECT}.{DATASET}.v_agent_directory` WHERE agent_id = @aid LIMIT 1")
 
@@ -279,6 +302,7 @@ def agent_deep_dive(agent_id: str) -> JSONResponse:
         "directory": dir_row[0] if dir_row else None,
         "users": users,
         "events": events,
+        "prompts": prompts,
     }, headers={"Cache-Control": "no-store"})
 
 
@@ -355,10 +379,20 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
               jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid  AS agent_id,
               jsonPayload.request.userevent.agentspaceinfo.agentinfo.name     AS agent_name
             FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
-            WHERE jsonPayload.useriamprincipal = @email
+            WHERE REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') = @email
               AND jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NULL
             ORDER BY timestamp DESC
             LIMIT 200""",
+        # Deep Research prompt reverse-attribution (±60s heuristic)
+        "dr_prompts":          f"""SELECT dr_ts, dr_action, attributed_prompt, prompt_ts, attribution_delta_sec, engine_display_name
+            FROM `{PROJECT}.{DATASET}.v_deep_research_prompts`
+            WHERE actor_email = @email
+            ORDER BY dr_ts DESC LIMIT 100""",
+        # Custom-agent prompt attribution (5min-after-open heuristic)
+        "custom_agent_prompts": f"""SELECT prompt_ts, agent_id, agent_name, agent_open_ts, elapsed_since_open_sec, prompt, engine_display_name
+            FROM `{PROJECT}.{DATASET}.v_custom_agent_prompts`
+            WHERE actor_email = @email
+            ORDER BY prompt_ts DESC LIMIT 100""",
     }
 
     def run_one(key_sql):

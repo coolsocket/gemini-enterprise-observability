@@ -209,19 +209,27 @@ function Picker() {
 
 // ============================================================
 // Compact metric block: big number + label + optional sub-line
-// Click → expand drill-down panel below (shows underlying events)
+// Click → expand drill-down panel below.
+// Two drill modes: plain (timestamps only) or "prompts" (with reverse-attributed prompt text).
 // ============================================================
-function Metric({ value, label, sub, accent, icon, drillRows, open, onToggle }: {
+type DrillPlain = { kind: "plain"; rows: Array<{ timestamp: string; primary: string; secondary?: string }> };
+type DrillPrompts = {
+  kind: "prompts";
+  rows: Array<{ timestamp: string; primary: string; prompt: string | null; delta_sec?: number | null }>;
+};
+type DrillData = DrillPlain | DrillPrompts;
+
+function Metric({ value, label, sub, accent, icon, drill, open, onToggle }: {
   value: number | string;
   label: string;
   sub?: React.ReactNode;
   accent: string;
   icon?: string;
-  drillRows?: Array<{ timestamp: string; primary: string; secondary?: string }>;
+  drill?: DrillData;
   open?: boolean;
   onToggle?: () => void;
 }) {
-  const clickable = !!onToggle && !!drillRows;
+  const clickable = !!onToggle && !!drill;
   return (
     <div className="group">
       <button
@@ -237,24 +245,45 @@ function Metric({ value, label, sub, accent, icon, drillRows, open, onToggle }: 
             <span className="text-xs text-ink-secondary font-medium uppercase tracking-wide">{label}</span>
             {clickable && (
               <span className="text-[10px] text-ink-muted ml-1">
-                {open ? "▾" : "▸"} {open ? "收起" : "看哪几次"}
+                {open ? "▾ 收起" : "▸ 看哪几次"}
               </span>
             )}
           </div>
           {sub && <div className="text-[11px] text-ink-muted mt-0.5">{sub}</div>}
         </div>
       </button>
-      {clickable && open && drillRows && (
-        <div className="mt-2 ml-9 max-h-[200px] overflow-y-auto border-l-2 border-info/30 pl-3 space-y-1">
-          {drillRows.length === 0 ? (
-            <div className="text-[11px] text-ink-muted py-1">该 metric 数字来自 snapshot，但最近 200 条 audit 事件里没有匹配项（可能已过 retention window）</div>
-          ) : drillRows.map((r, i) => (
-            <div key={i} className="text-[11px] flex items-baseline gap-2">
-              <span className="text-ink-muted font-mono shrink-0">{fmtTs(r.timestamp)}</span>
-              <span className="text-ink-secondary font-mono">{r.primary}</span>
-              {r.secondary && <span className="text-ink-muted">{r.secondary}</span>}
-            </div>
-          ))}
+      {clickable && open && drill && (
+        <div className="mt-2 ml-9 max-h-[260px] overflow-y-auto border-l-2 border-info/30 pl-3 space-y-1.5">
+          {drill.rows.length === 0 ? (
+            <div className="text-[11px] text-ink-muted py-1">最近事件里没匹配项（可能已过 retention window）</div>
+          ) : drill.kind === "plain" ? (
+            drill.rows.map((r, i) => (
+              <div key={i} className="text-[11px] flex items-baseline gap-2">
+                <span className="text-ink-muted font-mono shrink-0">{fmtTs(r.timestamp)}</span>
+                <span className="text-ink-secondary font-mono">{r.primary}</span>
+                {r.secondary && <span className="text-ink-muted">{r.secondary}</span>}
+              </div>
+            ))
+          ) : (
+            drill.rows.map((r, i) => (
+              <div key={i} className="text-[11px]">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-ink-muted font-mono shrink-0">{fmtTs(r.timestamp)}</span>
+                  <span className="text-ink-secondary font-mono text-[10px]">{r.primary}</span>
+                </div>
+                {r.prompt ? (
+                  <div className="ml-3 mt-0.5 text-ink-primary leading-snug">
+                    <span className="text-info">"</span>{r.prompt}<span className="text-info">"</span>
+                    {r.delta_sec != null && (
+                      <span className="text-[9px] text-ink-muted ml-2">±{Math.abs(r.delta_sec)}s</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="ml-3 mt-0.5 text-ink-muted italic">prompt 未找到</div>
+                )}
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>
@@ -342,16 +371,28 @@ export default function UserDeepDive() {
 
   // Drill-down rows: prefer per-feature arrays from backend (no autocomplete-noise truncation).
   // Fall back to filtering data_access_events for Search/Files (no dedicated endpoint for those).
-  const mapEvents = (rows: Array<{ timestamp: string; action: string; full_method: string }>) =>
-    rows.map(e => ({ timestamp: e.timestamp, primary: e.action, secondary: e.full_method.split(".").slice(-2, -1)[0] /* service */ }));
+  const mapEvents = (rows: Array<{ timestamp: string; action: string; full_method: string }>): DrillData =>
+    ({ kind: "plain", rows: rows.map(e => ({ timestamp: e.timestamp, primary: e.action, secondary: e.full_method.split(".").slice(-2, -1)[0] })) });
 
-  const filterAuditByPattern = (pattern: RegExp) =>
-    d.data_access_events
+  const filterAuditByPattern = (pattern: RegExp): DrillData => ({
+    kind: "plain",
+    rows: d.data_access_events
       .filter(e => pattern.test(e.full_method))
-      .map(e => ({ timestamp: e.timestamp, primary: e.action, secondary: e.full_method.split(".").slice(-2, -1)[0] }));
+      .map(e => ({ timestamp: e.timestamp, primary: e.action, secondary: e.full_method.split(".").slice(-2, -1)[0] })),
+  });
+
+  // Deep Research: use reverse-attributed prompts (heuristic ±60s window)
+  const drillDR: DrillData = {
+    kind: "prompts",
+    rows: (d.dr_prompts ?? []).map(r => ({
+      timestamp: r.dr_ts,
+      primary: r.dr_action,
+      prompt: r.attributed_prompt,
+      delta_sec: r.attribution_delta_sec,
+    })),
+  };
 
   const drillChat = mapEvents(d.chat_events ?? []);
-  const drillDR   = mapEvents(d.dr_events ?? []);
   const drillNB   = mapEvents(d.notebooklm_events ?? []);
   const drillA2A  = mapEvents(d.a2a_events ?? []);
   const drillSearch = filterAuditByPattern(/SearchService\.Search$/);
@@ -466,32 +507,32 @@ export default function UserDeepDive() {
           {totalChat > 0 && (
             <Metric icon="💬" value={totalChat} label="Chat turns" accent="text-ggreen"
               sub={<>StreamAssist · 跨 {enginesTouched} 个 engine</>}
-              drillRows={drillChat} open={openMetric === "chat"} onToggle={() => setOpenMetric(openMetric === "chat" ? null : "chat")} />
+              drill={drillChat} open={openMetric === "chat"} onToggle={() => setOpenMetric(openMetric === "chat" ? null : "chat")} />
           )}
           {totalDR > 0 && (
             <Metric icon="🔬" value={totalDR} label="Deep Research" accent="text-info"
               sub={<>AsyncAssist + Read · <span className="text-warn">prompt/response 不可见</span></>}
-              drillRows={drillDR} open={openMetric === "dr"} onToggle={() => setOpenMetric(openMetric === "dr" ? null : "dr")} />
+              drill={drillDR} open={openMetric === "dr"} onToggle={() => setOpenMetric(openMetric === "dr" ? null : "dr")} />
           )}
           {totalNB > 0 && (
             <Metric icon="📓" value={totalNB} label="NotebookLM ops" accent="text-gblue"
               sub={<>{nbNotebook} 生命周期 · {nbContent} 内容 · {nbAudio} 音频</>}
-              drillRows={drillNB} open={openMetric === "nb"} onToggle={() => setOpenMetric(openMetric === "nb" ? null : "nb")} />
+              drill={drillNB} open={openMetric === "nb"} onToggle={() => setOpenMetric(openMetric === "nb" ? null : "nb")} />
           )}
           {totalA2A > 0 && (
             <Metric icon="🔗" value={totalA2A} label="A2A 调用" accent="text-ggreen"
               sub="marketplace + custom agent 通过 A2A 协议"
-              drillRows={drillA2A} open={openMetric === "a2a"} onToggle={() => setOpenMetric(openMetric === "a2a" ? null : "a2a")} />
+              drill={drillA2A} open={openMetric === "a2a"} onToggle={() => setOpenMetric(openMetric === "a2a" ? null : "a2a")} />
           )}
           {totalSearch > 0 && (
             <Metric icon="🔎" value={totalSearch} label="REST Search" accent="text-gblue"
               sub="SearchService.Search (程序化)"
-              drillRows={drillSearch} open={openMetric === "search"} onToggle={() => setOpenMetric(openMetric === "search" ? null : "search")} />
+              drill={drillSearch} open={openMetric === "search"} onToggle={() => setOpenMetric(openMetric === "search" ? null : "search")} />
           )}
           {totalFiles > 0 && (
             <Metric icon="📎" value={totalFiles} label="文件操作" accent="text-ink-secondary"
               sub="List + Download SessionFile"
-              drillRows={drillFiles} open={openMetric === "files"} onToggle={() => setOpenMetric(openMetric === "files" ? null : "files")} />
+              drill={drillFiles} open={openMetric === "files"} onToggle={() => setOpenMetric(openMetric === "files" ? null : "files")} />
           )}
         </div>
 

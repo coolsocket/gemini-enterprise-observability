@@ -565,3 +565,131 @@ FROM (
   UNION ALL SELECT * FROM custom_agents
 )
 ORDER BY total DESC;
+
+-- ---------------------------------------------------------------
+-- v_deep_research_prompts — reverse-attribute prompts to Deep Research
+-- Heuristic: for each AsyncAssist/ReadAsyncAssist audit event, find the
+-- nearest StreamAssist prompt from the SAME actor within ±60s.
+-- The UI groups by prompt to show "these DR events all came from this query".
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_deep_research_prompts` AS
+WITH dr_events AS (
+  SELECT
+    timestamp AS dr_ts,
+    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^vivo-sim-', 'demo-') AS actor_email,
+    REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+)$') AS dr_action
+  FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_data_access`
+  WHERE protopayload_auditlog.methodName LIKE '%AssistantService.AsyncAssist'
+     OR protopayload_auditlog.methodName LIKE '%AssistantService.ReadAsyncAssist'
+),
+stream_prompts AS (
+  SELECT
+    timestamp AS prompt_ts,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
+    REGEXP_EXTRACT(jsonPayload.request.name, r'/engines/([^/]+)/') AS engine_id_raw,
+    (SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.logmetadata.methodname = 'StreamAssist'
+    AND ARRAY_LENGTH(jsonPayload.request.query.parts) > 0
+),
+-- For each DR event, pick the closest prompt (may be NULL if none within ±60s)
+attributed AS (
+  SELECT
+    dr.dr_ts,
+    dr.dr_action,
+    dr.actor_email,
+    ARRAY_AGG(STRUCT(sp.prompt_ts, sp.prompt, sp.engine_id_raw,
+                     ABS(TIMESTAMP_DIFF(sp.prompt_ts, dr.dr_ts, SECOND)) AS delta)
+              ORDER BY ABS(TIMESTAMP_DIFF(sp.prompt_ts, dr.dr_ts, SECOND)) ASC LIMIT 1
+    )[SAFE_OFFSET(0)] AS best
+  FROM dr_events dr
+  LEFT JOIN stream_prompts sp
+    ON sp.actor_email = dr.actor_email
+    AND ABS(TIMESTAMP_DIFF(sp.prompt_ts, dr.dr_ts, SECOND)) <= 60
+  GROUP BY dr.dr_ts, dr.dr_action, dr.actor_email
+)
+SELECT
+  a.dr_ts,
+  a.dr_action,
+  a.actor_email,
+  CASE
+    WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  a.best.prompt AS attributed_prompt,
+  a.best.prompt_ts AS prompt_ts,
+  a.best.delta AS attribution_delta_sec,
+  a.best.engine_id_raw AS engine_id_raw,
+  em.display_name AS engine_display_name
+FROM attributed a
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em
+  ON a.best.engine_id_raw = em.engine_id
+ORDER BY a.dr_ts DESC;
+
+-- ---------------------------------------------------------------
+-- v_custom_agent_prompts — reverse-attribute chats to custom agents
+-- Heuristic: when a user opens a custom agent's detail page
+-- (agentspacepagetype='agent'), attribute the next 5 minutes of
+-- StreamAssist chats to that agent.
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_custom_agent_prompts` AS
+WITH agent_opens AS (
+  SELECT
+    timestamp AS open_ts,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
+    jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid AS agent_id,
+    jsonPayload.request.userevent.agentspaceinfo.agentinfo.name AS agent_name
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent'
+    AND jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid IS NOT NULL
+),
+stream_prompts AS (
+  SELECT
+    timestamp AS prompt_ts,
+    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
+    REGEXP_EXTRACT(jsonPayload.request.name, r'/engines/([^/]+)/') AS engine_id_raw,
+    (SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+  WHERE jsonPayload.logmetadata.methodname = 'StreamAssist'
+    AND ARRAY_LENGTH(jsonPayload.request.query.parts) > 0
+),
+-- For each prompt, find the NEAREST preceding agent-open within 5 min
+attributed AS (
+  SELECT
+    sp.prompt_ts,
+    sp.prompt,
+    sp.actor_email,
+    sp.engine_id_raw,
+    ARRAY_AGG(STRUCT(ao.agent_id, ao.agent_name, ao.open_ts,
+                     TIMESTAMP_DIFF(sp.prompt_ts, ao.open_ts, SECOND) AS elapsed_sec)
+              ORDER BY ao.open_ts DESC LIMIT 1
+    )[SAFE_OFFSET(0)] AS best
+  FROM stream_prompts sp
+  JOIN agent_opens ao
+    ON ao.actor_email = sp.actor_email
+    AND ao.open_ts <= sp.prompt_ts
+    AND TIMESTAMP_DIFF(sp.prompt_ts, ao.open_ts, SECOND) <= 300
+  GROUP BY sp.prompt_ts, sp.prompt, sp.actor_email, sp.engine_id_raw
+)
+SELECT
+  a.prompt_ts,
+  a.actor_email,
+  CASE
+    WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
+    WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
+    ELSE 'UNKNOWN'
+  END AS origin,
+  a.best.agent_id AS agent_id,
+  a.best.agent_name AS agent_name,
+  a.best.open_ts AS agent_open_ts,
+  a.best.elapsed_sec AS elapsed_since_open_sec,
+  a.prompt,
+  a.engine_id_raw,
+  em.display_name AS engine_display_name
+FROM attributed a
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em
+  ON a.engine_id_raw = em.engine_id
+ORDER BY a.prompt_ts DESC;

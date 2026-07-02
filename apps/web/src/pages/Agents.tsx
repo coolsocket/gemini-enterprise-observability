@@ -190,6 +190,46 @@ function AgentDetail({ agentId }: { agentId: string }) {
         )}
       </Panel>
 
+      {/* Reverse-attributed prompts — heuristic time-window */}
+      {d.prompts && d.prompts.length > 0 && (
+        <Panel
+          title={`推断的 prompt · ${d.prompts.length} 条`}
+          action={<span className="text-[10px] text-ink-muted">时间窗启发式 · 可能有误差</span>}
+        >
+          <div className="text-[11px] text-ink-muted mb-2">
+            {agentId === "deep_research"
+              ? "AsyncAssist 事件 ±60s 内的 StreamAssist prompt 视为该次 Deep Research 的原始提问。同一 prompt 会关联到 submit + poll 多个事件。"
+              : "用户打开该 agent 后 5 分钟内的 StreamAssist prompt 视为对该 agent 的对话。"}
+          </div>
+          <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
+            {d.prompts.map((p, i) => (
+              <div key={i} className="rounded-md border border-border-subtle/60 bg-subtle/30 px-3 py-2 text-xs">
+                <div className="flex items-baseline gap-2 mb-1 text-[10px] text-ink-muted">
+                  <span className="font-mono">{fmtTs(p.event_ts)}</span>
+                  <span>·</span>
+                  <span className="font-mono">{p.actor_email}</span>
+                  {p.dr_action && (
+                    <>
+                      <span>·</span>
+                      <span className="text-info">{p.dr_action}</span>
+                    </>
+                  )}
+                  {p.attribution_delta_sec != null && (
+                    <span className="ml-auto">±{Math.abs(p.attribution_delta_sec)}s</span>
+                  )}
+                  {p.elapsed_since_open_sec != null && (
+                    <span className="ml-auto">agent 打开后 {p.elapsed_since_open_sec}s</span>
+                  )}
+                </div>
+                <div className="text-ink-primary leading-snug">
+                  <span className="text-info">"</span>{p.prompt}<span className="text-info">"</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
       {/* Event timeline */}
       <Panel title={`最近 ${d.events.length} 个事件`}>
         {d.events.length === 0 ? (

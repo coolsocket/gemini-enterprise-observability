@@ -332,6 +332,23 @@ export type UserDeepDive = {
     agent_id: string | null;
     agent_name: string | null;
   }>;
+  dr_prompts: Array<{
+    dr_ts: string;
+    dr_action: string;
+    attributed_prompt: string | null;
+    prompt_ts: string | null;
+    attribution_delta_sec: number | null;
+    engine_display_name: string | null;
+  }>;
+  custom_agent_prompts: Array<{
+    prompt_ts: string;
+    agent_id: string;
+    agent_name: string | null;
+    agent_open_ts: string;
+    elapsed_since_open_sec: number;
+    prompt: string;
+    engine_display_name: string | null;
+  }>;
 };
 
 export type AgentDirectoryRow = {
@@ -357,6 +374,18 @@ export type AgentDeepDive = {
     full_method?: string;
     engine_id_raw?: string | null;
     agent_id?: string | null;
+  }>;
+  prompts: Array<{
+    event_ts: string;
+    actor_email: string;
+    prompt: string;
+    engine_display_name?: string | null;
+    // Deep Research specific
+    dr_action?: string;
+    attribution_delta_sec?: number;
+    // Custom agent specific
+    elapsed_since_open_sec?: number;
+    agent_open_ts?: string;
   }>;
 };
 
