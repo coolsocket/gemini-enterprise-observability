@@ -52,6 +52,9 @@ VIEWS: dict[str, dict[str, str]] = {
     "v_agent_directory":                {"label": "Agent 目录",          "desc": "每个 agent 一行：built-in (Deep Research / NotebookLM / A2A) + custom"},
     "v_deep_research_prompts":          {"label": "Deep Research prompts", "desc": "AsyncAssist 事件反推的 prompt (±60s 时间窗)"},
     "v_custom_agent_prompts":           {"label": "Custom agent prompts",  "desc": "agent 页打开后 5min 内的 StreamAssist 归到该 agent"},
+    "v_daily_usage_per_user":           {"label": "每日使用量",             "desc": "per (user × 加州day × feature) 计数"},
+    "v_quota_utilization":              {"label": "配额使用率",             "desc": "今日每用户各 feature 使用 vs tier 上限"},
+    "v_quota_totals":                   {"label": "配额总览",               "desc": "全平台各 feature 已用/总配额/超额人数"},
 }
 
 # Views that have an `origin` column — supports ?origin= filter
@@ -521,10 +524,10 @@ def quota_config_get() -> dict[str, Any]:
 
 @app.post("/api/quota/config")
 def quota_config_set(key: str, value: str, by: str = "manual") -> dict[str, Any]:
-    allowed = {"purchased_seats", "claimed_window_days"}
-    if key not in allowed:
-        raise HTTPException(400, f"key must be one of {allowed}")
-    # MERGE
+    # Allow any key that starts with 'tier.' / 'quota.' / legacy purchased_seats / claimed_window_days
+    if not (key.startswith("tier.") or key.startswith("quota.")
+            or key in {"purchased_seats", "claimed_window_days"}):
+        raise HTTPException(400, "key must start with 'tier.' / 'quota.' or be a legacy key")
     _bq.query(
         f"MERGE `{PROJECT}.{DATASET}.quota_config` t "
         f"USING (SELECT '{key}' k, '{value}' v) s "
@@ -534,6 +537,59 @@ def quota_config_set(key: str, value: str, by: str = "manual") -> dict[str, Any]
         f"VALUES (s.k, s.v, CURRENT_TIMESTAMP(), '{by}')"
     ).result()
     return {"key": key, "value": value, "ok": True}
+
+
+# ============================================================
+# Quota dashboard endpoints
+# ============================================================
+
+@app.get("/api/quota/overview")
+def quota_overview() -> JSONResponse:
+    """Everything the /quota page needs in one round trip."""
+    import concurrent.futures
+    queries = {
+        "totals":      f"SELECT * FROM `{PROJECT}.{DATASET}.v_quota_totals`",
+        "utilization": f"SELECT * FROM `{PROJECT}.{DATASET}.v_quota_utilization` ORDER BY utilization DESC LIMIT 500",
+        "tiers":       f"SELECT actor_email, tier, notes, assigned_at, assigned_by FROM `{PROJECT}.{DATASET}.user_tier` ORDER BY actor_email",
+        "config":      f"SELECT key, value FROM `{PROJECT}.{DATASET}.quota_config` WHERE key LIKE 'tier.%' OR key LIKE 'quota.%' ORDER BY key",
+        "recent":      f"""SELECT * FROM `{PROJECT}.{DATASET}.v_daily_usage_per_user`
+                           WHERE d >= DATE_SUB(DATE(CURRENT_TIMESTAMP(), 'America/Los_Angeles'), INTERVAL 6 DAY)
+                           ORDER BY d DESC, actor_email, feature""",
+    }
+    def run(kv):
+        k, sql = kv
+        try:
+            return k, [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+        except Exception as e:
+            log.warning(f"quota_overview {k} failed: {e}")
+            return k, []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as pool:
+        out = dict(pool.map(run, queries.items()))
+    # Also expose "today" in CA time so frontend knows what "today" means
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    today_ca = _dt.datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    return JSONResponse(content={"today_ca": today_ca, **out},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/quota/tier")
+def quota_set_tier(email: str, tier: str, by: str = "manual", notes: str = "") -> dict[str, Any]:
+    """Assign or update an actor's tier."""
+    if tier not in {"standard", "plus"}:
+        raise HTTPException(400, "tier must be 'standard' or 'plus'")
+    if "'" in email or "'" in notes:
+        raise HTTPException(400, "no single quotes in email/notes")
+    _bq.query(f"""
+        MERGE `{PROJECT}.{DATASET}.user_tier` t
+        USING (SELECT '{email}' email, '{tier}' tier) s
+        ON t.actor_email = s.email
+        WHEN MATCHED THEN UPDATE SET tier = s.tier, assigned_at = CURRENT_TIMESTAMP(),
+                                     assigned_by = '{by}', notes = '{notes}'
+        WHEN NOT MATCHED THEN INSERT (actor_email, tier, assigned_at, assigned_by, notes)
+          VALUES (s.email, s.tier, CURRENT_TIMESTAMP(), '{by}', '{notes}')
+    """).result()
+    return {"email": email, "tier": tier, "ok": True}
 
 
 @app.get("/api/summary")

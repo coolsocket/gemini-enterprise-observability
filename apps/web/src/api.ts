@@ -389,6 +389,42 @@ export type AgentDeepDive = {
   }>;
 };
 
+export type QuotaTotalRow = {
+  feature: string;
+  eligible_users: number;
+  total_daily_quota: number;
+  total_used_today: number;
+  overall_utilization: number | null;
+  users_over_quota: number;
+};
+
+export type QuotaUtilizationRow = {
+  actor_email: string;
+  tier: "standard" | "plus";
+  feature: string;
+  daily_limit: number;
+  used_today: number;
+  utilization: number;
+  over_quota: boolean;
+};
+
+export type UserTierRow = {
+  actor_email: string;
+  tier: "standard" | "plus";
+  notes: string | null;
+  assigned_at: string | null;
+  assigned_by: string | null;
+};
+
+export type QuotaOverview = {
+  today_ca: string;
+  totals: QuotaTotalRow[];
+  utilization: QuotaUtilizationRow[];
+  tiers: UserTierRow[];
+  config: Array<{ key: string; value: string }>;
+  recent: Array<{ d: string; actor_email: string; feature: string; n: number }>;
+};
+
 export const api = {
   healthz: () => get<{ status: string; project: string; dataset: string }>("/api/healthz"),
   meta:    () => get<Meta>("/api/meta"),
@@ -407,4 +443,7 @@ export const api = {
   quotaConfig:   () => get<QuotaConfig>("/api/quota/config"),
   quotaSet:      (key: string, value: string) =>
     post<{ key: string; value: string; ok: boolean }>(`/api/quota/config?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}&by=ui`),
+  quotaOverview: () => get<QuotaOverview>("/api/quota/overview"),
+  quotaSetTier:  (email: string, tier: "standard" | "plus", notes = "") =>
+    post<{ email: string; tier: string; ok: boolean }>(`/api/quota/tier?email=${encodeURIComponent(email)}&tier=${tier}&by=ui&notes=${encodeURIComponent(notes)}`),
 };

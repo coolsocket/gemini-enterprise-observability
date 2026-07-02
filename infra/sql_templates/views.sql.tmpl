@@ -693,3 +693,132 @@ FROM attributed a
 LEFT JOIN `{{PROJECT}}.{{DATASET}}.engine_metadata` em
   ON a.engine_id_raw = em.engine_id
 ORDER BY a.prompt_ts DESC;
+
+-- ---------------------------------------------------------------
+-- v_daily_usage_per_user — per (user × day-in-California × feature) counts
+-- Daily buckets are relative to America/Los_Angeles (GE quota resets at PT midnight).
+-- BigQuery auto-handles PST/PDT via DATE(ts, 'America/Los_Angeles').
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_daily_usage_per_user` AS
+WITH audit AS (
+  SELECT
+    DATE(timestamp, 'America/Los_Angeles') AS d,
+    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^vivo-sim-', 'demo-') AS actor_email,
+    protopayload_auditlog.methodName AS method,
+    protopayload_auditlog.serviceName AS service
+  FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_data_access`
+  WHERE protopayload_auditlog.authenticationInfo.principalEmail IS NOT NULL
+),
+admin AS (
+  SELECT
+    DATE(timestamp, 'America/Los_Angeles') AS d,
+    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^vivo-sim-', 'demo-') AS actor_email,
+    protopayload_auditlog.methodName AS method
+  FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_activity`
+  WHERE protopayload_auditlog.authenticationInfo.principalEmail IS NOT NULL
+),
+combined AS (
+  -- chat: StreamAssist
+  SELECT d, actor_email, 'chat' AS feature, COUNT(*) AS n
+  FROM audit WHERE method LIKE '%AssistantService.StreamAssist' OR method LIKE '%AssistantService.Assist'
+  GROUP BY d, actor_email
+  UNION ALL
+  -- deep_research: AsyncAssist (submit only; ReadAsyncAssist polls not counted)
+  SELECT d, actor_email, 'deep_research' AS feature, COUNTIF(method LIKE '%AssistantService.AsyncAssist')
+  FROM audit WHERE method LIKE '%AsyncAssist'
+  GROUP BY d, actor_email
+  UNION ALL
+  -- notebooklm: sum of all notebooklm.* methods
+  SELECT d, actor_email, 'notebooklm' AS feature, COUNT(*) AS n
+  FROM audit WHERE method LIKE '%notebooklm.%'
+  GROUP BY d, actor_email
+  UNION ALL
+  -- a2a: agent-to-agent invocations
+  SELECT d, actor_email, 'a2a' AS feature, COUNT(*) AS n
+  FROM audit WHERE method LIKE '%assistants.agents.a2a.v1.%'
+  GROUP BY d, actor_email
+  UNION ALL
+  -- video_gen: aiplatform imagen/veo models (placeholder — no data yet)
+  SELECT d, actor_email, 'video_gen' AS feature, COUNT(*) AS n
+  FROM audit WHERE service = 'aiplatform.googleapis.com'
+    AND (LOWER(method) LIKE '%veo%' OR LOWER(method) LIKE '%videogeneration%')
+  GROUP BY d, actor_email
+  UNION ALL
+  SELECT d, actor_email, 'image_gen' AS feature, COUNT(*) AS n
+  FROM audit WHERE service = 'aiplatform.googleapis.com'
+    AND (LOWER(method) LIKE '%imagen%' OR LOWER(method) LIKE '%imagegeneration%')
+  GROUP BY d, actor_email
+  UNION ALL
+  -- agent_create: AgentService.CreateAgent (from admin_activity)
+  SELECT d, actor_email, 'agent_create' AS feature, COUNT(*) AS n
+  FROM admin WHERE method LIKE '%AgentService.CreateAgent'
+  GROUP BY d, actor_email
+)
+SELECT
+  d, actor_email, feature, n
+FROM combined
+WHERE n > 0
+ORDER BY d DESC, actor_email, feature;
+
+-- ---------------------------------------------------------------
+-- v_quota_utilization — today's usage vs each user's tier limit
+-- Uses California "today" (DATE(NOW, 'America/Los_Angeles'))
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_quota_utilization` AS
+WITH cfg AS (
+  SELECT key, value FROM `{{PROJECT}}.{{DATASET}}.quota_config`
+),
+today_bucket AS (
+  SELECT DATE(CURRENT_TIMESTAMP(), 'America/Los_Angeles') AS today
+),
+tier_limits AS (
+  -- Pivot config into a lookup: (tier, feature) -> limit
+  SELECT
+    SPLIT(key, '.')[SAFE_OFFSET(1)] AS tier,
+    REGEXP_EXTRACT(key, r'\.([^.]+)_daily$') AS feature,
+    CAST(value AS INT64) AS daily_limit
+  FROM cfg
+  WHERE key LIKE 'tier.%_daily'
+),
+default_tier AS (
+  SELECT value AS t FROM cfg WHERE key = 'quota.default_tier'
+),
+today_usage AS (
+  SELECT actor_email, feature, n AS used
+  FROM `{{PROJECT}}.{{DATASET}}.v_daily_usage_per_user`, today_bucket
+  WHERE d = today_bucket.today
+)
+SELECT
+  ut.actor_email,
+  COALESCE(t.tier, (SELECT t FROM default_tier)) AS tier,
+  tl.feature,
+  tl.daily_limit,
+  IFNULL(tu.used, 0) AS used_today,
+  IFNULL(tu.used, 0) / tl.daily_limit AS utilization,
+  IFNULL(tu.used, 0) >= tl.daily_limit AS over_quota
+FROM (SELECT DISTINCT actor_email FROM `{{PROJECT}}.{{DATASET}}.user_tier`
+      UNION DISTINCT
+      SELECT DISTINCT actor_email FROM `{{PROJECT}}.{{DATASET}}.v_data_access_summary`
+      WHERE actor_email IS NOT NULL) ut
+LEFT JOIN `{{PROJECT}}.{{DATASET}}.user_tier` t USING (actor_email)
+CROSS JOIN tier_limits tl
+LEFT JOIN today_usage tu
+  ON tu.actor_email = ut.actor_email AND tu.feature = tl.feature
+WHERE tl.tier = COALESCE(t.tier, (SELECT t FROM default_tier))
+ORDER BY utilization DESC, ut.actor_email, tl.feature;
+
+-- ---------------------------------------------------------------
+-- v_quota_totals — today's platform-wide usage vs sum(per-user tier limit)
+-- Useful for "we bought N seats × 10 DR/day = 10N DR quota; today's actual = M"
+-- ---------------------------------------------------------------
+CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_quota_totals` AS
+SELECT
+  feature,
+  COUNT(DISTINCT actor_email) AS eligible_users,
+  SUM(daily_limit) AS total_daily_quota,
+  SUM(used_today) AS total_used_today,
+  SAFE_DIVIDE(SUM(used_today), SUM(daily_limit)) AS overall_utilization,
+  COUNTIF(over_quota) AS users_over_quota
+FROM `{{PROJECT}}.{{DATASET}}.v_quota_utilization`
+GROUP BY feature
+ORDER BY overall_utilization DESC;

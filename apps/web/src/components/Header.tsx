@@ -15,6 +15,7 @@ const ROUTE_KEYS: Record<string, string> = {
   "/user":          "user",
   "/agents":        "agents",
   "/engines":       "engines",
+  "/quota":         "quota",
   "/builders":      "builders",
   "/data-access":   "data_access",
   "/files":         "files",

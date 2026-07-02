@@ -113,6 +113,23 @@ resource "google_bigquery_table" "quota_config" {
   ])
 }
 
+# Per-actor tier assignment (standard vs plus vs custom). Free-form so admins can
+# add new tiers or use "auto" to let a rules-based classifier decide.
+resource "google_bigquery_table" "user_tier" {
+  project             = var.project_id
+  dataset_id          = google_bigquery_dataset.ge_observability.dataset_id
+  table_id            = "user_tier"
+  deletion_protection = false
+
+  schema = jsonencode([
+    { name = "actor_email", type = "STRING", mode = "REQUIRED" },
+    { name = "tier",        type = "STRING", mode = "REQUIRED" }, # 'standard' | 'plus'
+    { name = "assigned_at", type = "TIMESTAMP" },
+    { name = "assigned_by", type = "STRING" },
+    { name = "notes",       type = "STRING" },
+  ])
+}
+
 resource "google_bigquery_table" "snapshot_meta" {
   project             = var.project_id
   dataset_id          = google_bigquery_dataset.ge_observability.dataset_id
@@ -158,7 +175,8 @@ resource "google_logging_project_sink" "ge_observability_unified" {
     OR (logName="projects/${var.project_id}/logs/cloudaudit.googleapis.com%2Factivity"
         AND protoPayload.serviceName="discoveryengine.googleapis.com")
     OR (logName="projects/${var.project_id}/logs/cloudaudit.googleapis.com%2Fdata_access"
-        AND protoPayload.serviceName="discoveryengine.googleapis.com")
+        AND (protoPayload.serviceName="discoveryengine.googleapis.com"
+          OR protoPayload.serviceName="aiplatform.googleapis.com"))
   EOT
 
   bigquery_options {
