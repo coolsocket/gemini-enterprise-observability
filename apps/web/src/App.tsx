@@ -11,6 +11,7 @@ const Activity      = lazy(() => import("./pages/Activity"));
 const DataAccess    = lazy(() => import("./pages/DataAccess"));
 const UserDeepDive  = lazy(() => import("./pages/UserDeepDive"));
 const Agents        = lazy(() => import("./pages/Agents"));
+const Engines       = lazy(() => import("./pages/Engines"));
 const Raw           = lazy(() => import("./pages/Raw"));
 const Settings      = lazy(() => import("./pages/Settings"));
 
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/user/:email"   element={page(UserDeepDive)} />
           <Route path="/agents"        element={page(Agents)} />
           <Route path="/agent/:agentId" element={page(Agents)} />
+          <Route path="/engines"       element={page(Engines)} />
           <Route path="/builders"    element={page(Builders)} />
           <Route path="/data-access" element={page(DataAccess)} />
           <Route path="/activity"    element={page(Activity)} />
