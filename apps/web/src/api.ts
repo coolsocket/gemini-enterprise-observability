@@ -267,7 +267,7 @@ async function post<T>(path: string): Promise<T> {
   return (await r.json()) as T;
 }
 
-function qs(params: Record<string, string | null | undefined>): string {
+function qs(params: Record<string, string | number | null | undefined>): string {
   const parts = Object.entries(params)
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
@@ -394,11 +394,11 @@ export const api = {
   meta:    () => get<Meta>("/api/meta"),
   engines: () => get<EngineListResponse>("/api/engines"),
   aliveResources: () => get<AliveResources>("/api/resources/alive"),
-  summary: (origin?: Origin, engineId?: string | null) =>
-    get<Summary & Record<string, any>>(`/api/summary${qs({ origin, engine_id: engineId })}`),
-  view:    <T = Record<string, unknown>>(name: string, origin?: Origin, engineId?: string | null) =>
-    get<ViewResponse<T>>(`/api/v/${encodeURIComponent(name)}${qs({ origin, engine_id: engineId })}`),
-  users:   () => get<{ users: UserListEntry[]; count: number }>("/api/users"),
+  summary: (origin?: Origin, engineId?: string | null, sinceHours?: number | null) =>
+    get<Summary & Record<string, any>>(`/api/summary${qs({ origin, engine_id: engineId, since_hours: sinceHours })}`),
+  view:    <T = Record<string, unknown>>(name: string, origin?: Origin, engineId?: string | null, sinceHours?: number | null) =>
+    get<ViewResponse<T>>(`/api/v/${encodeURIComponent(name)}${qs({ origin, engine_id: engineId, since_hours: sinceHours })}`),
+  users:   (sinceHours?: number | null) => get<{ users: UserListEntry[]; count: number }>(`/api/users${qs({ since_hours: sinceHours })}`),
   user:    (email: string) => get<UserDeepDive>(`/api/user/${encodeURIComponent(email)}`),
   agents:  () => get<{ agents: AgentDirectoryRow[]; count: number }>("/api/agents"),
   agent:   (agentId: string) => get<AgentDeepDive>(`/api/agent/${encodeURIComponent(agentId)}`),

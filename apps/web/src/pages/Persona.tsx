@@ -3,6 +3,7 @@ import { api, PersonaRow } from "../api";
 import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
+import { useRange } from "../timerange";
 
 const PERSONA_TAG: Record<string, string> = {
   POWER_USER:      "bg-gblue/15   text-gblue   border-gblue/30",
@@ -22,10 +23,11 @@ const ORIGIN_TAG: Record<string, string> = {
 
 export default function Persona() {
   const { origin } = useOrigin();
+  const { range } = useRange();
   const q = useQuery({
     // v_user_persona doesn't have engine_id column, so don't filter by engineId
-    queryKey: ["v_user_persona", origin],
-    queryFn: () => api.view<PersonaRow>("v_user_persona", origin),
+    queryKey: ["v_user_persona", origin, range],
+    queryFn: () => api.view<PersonaRow>("v_user_persona", origin, null, range),
   });
 
   const cols: Col<PersonaRow>[] = [

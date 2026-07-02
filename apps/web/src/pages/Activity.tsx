@@ -4,6 +4,7 @@ import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
+import { useRange } from "../timerange";
 
 const ACTION_TONE: Record<string, string> = {
   Create: "bg-ggreen/15 text-ggreen border-ggreen/30",
@@ -29,9 +30,10 @@ function actionTone(action: string): string {
 export default function Activity() {
   const { origin } = useOrigin();
   const { engineId } = useEngine();
+  const { range } = useRange();
   const q = useQuery({
-    queryKey: ["v_admin_activity", origin, engineId],
-    queryFn: () => api.view<AdminActivityRow>("v_admin_activity", origin, engineId),
+    queryKey: ["v_admin_activity", origin, engineId, range],
+    queryFn: () => api.view<AdminActivityRow>("v_admin_activity", origin, engineId, range),
   });
 
   const cols: Col<AdminActivityRow>[] = [

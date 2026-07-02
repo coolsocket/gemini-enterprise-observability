@@ -95,8 +95,34 @@ VIEWS_WITH_ENGINE: set[str] = {
 }
 
 
+# Per-view time column for since_hours filter (None = no time filter possible)
+VIEW_TIME_COL: dict[str, str | None] = {
+    "v_admin_activity":              "timestamp",
+    "v_builders":                    "last_admin_action",
+    "v_data_access":                 "timestamp",
+    "v_data_access_summary":         "last_access",
+    "v_conversations":               "timestamp",
+    "v_conversations_with_response": "timestamp",
+    "v_choices":                     "timestamp",
+    "v_choices_agg":                 None,  # aggregated, no representative ts
+    "v_user_persona":                "last_seen",
+    "v_user_usage":                  "last_seen",
+    "v_engine_adoption":             None,
+    "v_zero_use_seats":              None,
+    "v_dau":                         "d",  # DATE not TIMESTAMP
+    "v_session_files":               "last_op",
+    "v_agent_usage":                 None,
+    "v_agentspace_navigation":       "last_visit",
+    "v_agentspace_navigation_summary": "last_visit",
+    "v_agent_directory":             "last_activity",
+    "v_deep_research_prompts":       "dr_ts",
+    "v_custom_agent_prompts":        "prompt_ts",
+}
+
+
 def _rows(view: str, limit: int = 1000, origin: str | None = None,
-          engine_id: str | None = None, live: bool = False) -> list[dict[str, Any]]:
+          engine_id: str | None = None, live: bool = False,
+          since_hours: int | None = None) -> list[dict[str, Any]]:
     if view not in VIEWS:
         raise HTTPException(status_code=404, detail=f"Unknown view: {view}")
     where_clauses = []
@@ -116,8 +142,19 @@ def _rows(view: str, limit: int = 1000, origin: str | None = None,
         if not engine_id.replace("-", "").replace("_", "").isalnum():
             raise HTTPException(status_code=400, detail="invalid engine_id")
         where_clauses.append(f"{col} = '{engine_id}'")
+    if since_hours and since_hours > 0:
+        tcol = VIEW_TIME_COL.get(view)
+        if tcol:
+            # DATE columns need DATE cutoff; TIMESTAMP columns need TIMESTAMP cutoff
+            if tcol == "d":
+                where_clauses.append(f"{tcol} >= DATE_SUB(CURRENT_DATE(), INTERVAL {int(since_hours // 24)} DAY)")
+            else:
+                where_clauses.append(f"{tcol} >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {int(since_hours)} HOUR)")
     where = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     # Default: read from snapshot table (fast); ?live=true bypasses to view (fresh).
+    # If since_hours is set, force live so we're not filtered by stale snapshot age.
+    if since_hours:
+        live = True
     src = view if live else snapshot_name(view)
     sql = f"SELECT * FROM `{PROJECT}.{DATASET}.{src}`{where} LIMIT {limit}"
     log.info("query: %s", sql)
@@ -167,12 +204,15 @@ def list_views() -> dict[str, Any]:
 
 @app.get("/api/v/{view}")
 def view_rows(view: str, limit: int = 1000, origin: str | None = None,
-              engine_id: str | None = None, live: bool = False) -> JSONResponse:
-    rows = _rows(view, limit=limit, origin=origin, engine_id=engine_id, live=live)
+              engine_id: str | None = None, live: bool = False,
+              since_hours: int | None = None) -> JSONResponse:
+    rows = _rows(view, limit=limit, origin=origin, engine_id=engine_id,
+                 live=live, since_hours=since_hours)
     return JSONResponse(
         content={"view": view, "rows": rows, "count": len(rows),
                  "origin": origin, "engine_id": engine_id,
-                 "source": "live_view" if live else "snapshot"},
+                 "since_hours": since_hours,
+                 "source": "live_view" if (live or since_hours) else "snapshot"},
         headers={"Cache-Control": "no-store"},
     )
 
@@ -307,8 +347,11 @@ def agent_deep_dive(agent_id: str) -> JSONResponse:
 
 
 @app.get("/api/users")
-def list_users() -> dict[str, Any]:
+def list_users(since_hours: int | None = None) -> dict[str, Any]:
     """All actors who've shown up anywhere, with rich per-user dimensions for picker."""
+    time_filter = ""
+    if since_hours and since_hours > 0:
+        time_filter = f"WHERE last_access >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {int(since_hours)} HOUR)"
     sql = f"""
     WITH base AS (
       SELECT
@@ -324,6 +367,7 @@ def list_users() -> dict[str, Any]:
         COUNT(DISTINCT IF(engine_id IS NOT NULL, engine_id, NULL)) AS engines_touched,
         MAX(last_access) AS last_access
       FROM `{PROJECT}.{DATASET}.v_data_access_summary`
+      {time_filter}
       GROUP BY actor_email
     )
     SELECT
@@ -493,7 +537,8 @@ def quota_config_set(key: str, value: str, by: str = "manual") -> dict[str, Any]
 
 
 @app.get("/api/summary")
-def summary(origin: str | None = None, engine_id: str | None = None, live: bool = False) -> dict[str, Any]:
+def summary(origin: str | None = None, engine_id: str | None = None, live: bool = False,
+            since_hours: int | None = None) -> dict[str, Any]:
     """KPI summary. ?origin=HUMAN filters out service accounts.
 
     Restructured to surface two-group semantics:
@@ -509,6 +554,20 @@ def summary(origin: str | None = None, engine_id: str | None = None, live: bool 
         engine_filter_summary = f" AND engine_id = '{engine_id}'"
         engine_filter_conv = f" AND engine_id_raw = '{engine_id}'"
 
+    # Time-range filters (per-view, since column varies)
+    time_filter_da = ""     # v_data_access_summary uses last_access
+    time_filter_conv = ""   # v_conversations uses timestamp
+    time_filter_b = ""      # v_builders uses last_admin_action
+    time_filter_p = ""      # v_user_persona uses last_seen
+    if since_hours and since_hours > 0:
+        sh = int(since_hours)
+        time_filter_da   = f" AND last_access >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {sh} HOUR)"
+        time_filter_conv = f" AND timestamp   >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {sh} HOUR)"
+        time_filter_b    = f" AND last_admin_action >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {sh} HOUR)"
+        time_filter_p    = f" AND last_seen   >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {sh} HOUR)"
+        # since_hours forces live view (snapshot has stale timestamps for the filter)
+        live = True
+
     # Default to snapshots for speed; ?live=true hits views
     p = "v_user_persona" if live else "s_user_persona"
     b = "v_builders" if live else "s_builders"
@@ -521,20 +580,20 @@ def summary(origin: str | None = None, engine_id: str | None = None, live: bool 
       humans AS (
         SELECT persona, chat_turns_total, chat_turns_7d
         FROM `{PROJECT}.{DATASET}.{p}`
-        WHERE origin IN ('HUMAN', 'SIMULATED')
+        WHERE origin IN ('HUMAN', 'SIMULATED') {time_filter_p}
       ),
       a AS (SELECT SUM(total_admin_actions) c FROM `{PROJECT}.{DATASET}.{b}`
-            WHERE TRUE {origin_filter}),
+            WHERE TRUE {origin_filter} {time_filter_b}),
       d AS (SELECT SUM(chat_turns) chat,
                    SUM(total_data_access) total
             FROM `{PROJECT}.{DATASET}.{da}`
-            WHERE TRUE {origin_filter} {engine_filter_summary}),
+            WHERE TRUE {origin_filter} {engine_filter_summary} {time_filter_da}),
       e AS (SELECT COUNT(*) c FROM `{PROJECT}.{DATASET}.{ea}`),
       adm AS (SELECT MAX(timestamp) ts FROM `{PROJECT}.{DATASET}.cloudaudit_googleapis_com_activity`),
       dac AS (SELECT MAX(timestamp) ts FROM `{PROJECT}.{DATASET}.cloudaudit_googleapis_com_data_access`),
       ua  AS (SELECT MAX(timestamp) ts FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`),
       conv AS (SELECT COUNT(*) c FROM `{PROJECT}.{DATASET}.{cv}`
-               WHERE TRUE {origin_filter} {engine_filter_conv})
+               WHERE TRUE {origin_filter} {engine_filter_conv} {time_filter_conv})
     SELECT
       -- 采纳与质量（HUMAN + SIMULATED — 真人 + 模拟人）
       (SELECT COUNT(*) FROM humans) AS human_users,

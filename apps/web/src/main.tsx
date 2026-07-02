@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { OriginProvider } from "./origin";
 import { EngineProvider } from "./engine";
+import { RangeProvider } from "./timerange";
 import { I18nProvider } from "./i18n";
 import "./styles.css";
 
@@ -37,7 +38,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <I18nProvider>
           <OriginProvider>
             <EngineProvider>
-              <App />
+              <RangeProvider>
+                <App />
+              </RangeProvider>
             </EngineProvider>
           </OriginProvider>
         </I18nProvider>

@@ -4,6 +4,7 @@ import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
+import { useRange } from "../timerange";
 
 const SIGNAL_TAG: Record<string, string> = {
   confirmed: "bg-ggreen/15 text-ggreen border-ggreen/30",
@@ -21,21 +22,22 @@ const ORIGIN_TAG: Record<string, string> = {
 export default function Files() {
   const { origin } = useOrigin();
   const { engineId } = useEngine();
+  const { range } = useRange();
   const files  = useQuery({
-    queryKey: ["v_session_files", origin, engineId],
-    queryFn: () => api.view<SessionFileRow>("v_session_files", origin, engineId),
+    queryKey: ["v_session_files", origin, engineId, range],
+    queryFn: () => api.view<SessionFileRow>("v_session_files", origin, engineId, range),
   });
   const agents = useQuery({
-    queryKey: ["v_agent_usage", null, engineId],
-    queryFn: () => api.view<AgentUsageRow>("v_agent_usage", null, engineId),
+    queryKey: ["v_agent_usage", null, engineId, range],
+    queryFn: () => api.view<AgentUsageRow>("v_agent_usage", null, engineId, range),
   });
   const navSum = useQuery({
-    queryKey: ["v_agentspace_navigation_summary", origin],
-    queryFn: () => api.view<AgentspaceNavSummaryRow>("v_agentspace_navigation_summary", origin),
+    queryKey: ["v_agentspace_navigation_summary", origin, range],
+    queryFn: () => api.view<AgentspaceNavSummaryRow>("v_agentspace_navigation_summary", origin, null, range),
   });
   const navDetail = useQuery({
-    queryKey: ["v_agentspace_navigation", origin, engineId],
-    queryFn: () => api.view<AgentspaceNavRow>("v_agentspace_navigation", origin, engineId),
+    queryKey: ["v_agentspace_navigation", origin, engineId, range],
+    queryFn: () => api.view<AgentspaceNavRow>("v_agentspace_navigation", origin, engineId, range),
   });
 
   const fileCols: Col<SessionFileRow>[] = [

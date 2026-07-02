@@ -8,6 +8,7 @@ import Card, { EmptyState, Panel } from "../components/Card";
 import { fmtTs } from "../components/DataTable";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
+import { useRange } from "../timerange";
 import { useI18n } from "../i18n";
 
 const PERSONA_COLOR: Record<string, string> = {
@@ -34,11 +35,12 @@ export default function Overview() {
   const { t } = useI18n();
   const { origin } = useOrigin();
   const { engineId } = useEngine();
-  const summary = useQuery({ queryKey: ["summary", origin, engineId], queryFn: () => api.summary(origin, engineId) });
-  const persona = useQuery({ queryKey: ["v_user_persona"],            queryFn: () => api.view<PersonaRow>("v_user_persona") });
-  const dau     = useQuery({ queryKey: ["v_dau"],                     queryFn: () => api.view<DauRow>("v_dau") });
-  const engines = useQuery({ queryKey: ["v_engine_adoption"],         queryFn: () => api.view<EngineRow>("v_engine_adoption") });
-  const alive   = useQuery({ queryKey: ["alive"],                     queryFn: api.aliveResources });
+  const { range } = useRange();
+  const summary = useQuery({ queryKey: ["summary", origin, engineId, range], queryFn: () => api.summary(origin, engineId, range) });
+  const persona = useQuery({ queryKey: ["v_user_persona", range],            queryFn: () => api.view<PersonaRow>("v_user_persona", null, null, range) });
+  const dau     = useQuery({ queryKey: ["v_dau", range],                     queryFn: () => api.view<DauRow>("v_dau", null, null, range) });
+  const engines = useQuery({ queryKey: ["v_engine_adoption"],                queryFn: () => api.view<EngineRow>("v_engine_adoption") });
+  const alive   = useQuery({ queryKey: ["alive"],                            queryFn: api.aliveResources });
 
   const s = summary.data;
 

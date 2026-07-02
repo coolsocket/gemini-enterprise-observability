@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import { IChip, IMoon, IRefresh, ISun } from "./Icon";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
+import { useRange, type Range } from "../timerange";
 import { useI18n, type Locale } from "../i18n";
 import { api, type Origin } from "../api";
 
@@ -84,6 +85,38 @@ function ThemeToggle() {
     >
       {theme === "dark" ? <ISun /> : <IMoon />}
     </button>
+  );
+}
+
+function RangeToggle() {
+  const { range, setRange } = useRange();
+  const qc = useQueryClient();
+  const opts: { val: Range; label: string }[] = [
+    { val: 24,   label: "24h" },
+    { val: 168,  label: "7d" },
+    { val: 720,  label: "30d" },
+    { val: null, label: "全部" },
+  ];
+  const pick = (v: Range) => {
+    setRange(v);
+    qc.invalidateQueries();
+  };
+  return (
+    <div className="inline-flex items-center h-8 rounded-md border border-border-subtle bg-surface overflow-hidden text-xs" title="时间范围">
+      {opts.map((o) => (
+        <button
+          key={String(o.val)}
+          onClick={() => pick(o.val)}
+          className={`px-2.5 h-full transition-colors tabular-nums ${
+            range === o.val
+              ? "bg-info/20 text-info font-medium"
+              : "text-ink-secondary hover:text-ink-primary hover:bg-subtle"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -266,6 +299,7 @@ export default function Header() {
       <div className="flex items-center gap-2 shrink-0">
         <StatusBadge ok={healthOk} />
         <EngineSelector />
+        <RangeToggle />
         <OriginToggle />
         <LangToggle />
         <ThemeToggle />

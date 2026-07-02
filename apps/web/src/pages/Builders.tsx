@@ -3,6 +3,7 @@ import { api, BuilderRow } from "../api";
 import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
+import { useRange } from "../timerange";
 
 const ORIGIN_TAG: Record<string, string> = {
   HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
@@ -12,9 +13,10 @@ const ORIGIN_TAG: Record<string, string> = {
 
 export default function Builders() {
   const { origin } = useOrigin();
+  const { range } = useRange();
   const q = useQuery({
-    queryKey: ["v_builders", origin],
-    queryFn: () => api.view<BuilderRow>("v_builders", origin),
+    queryKey: ["v_builders", origin, range],
+    queryFn: () => api.view<BuilderRow>("v_builders", origin, null, range),
   });
 
   const resourceCell = (created: number, deleted: number, color: string) => (

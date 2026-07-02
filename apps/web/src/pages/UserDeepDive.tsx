@@ -4,6 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { api, UserDeepDive as UserData } from "../api";
 import { Panel, EmptyState } from "../components/Card";
 import { fmtTs } from "../components/DataTable";
+import { useRange } from "../timerange";
 
 const ORIGIN_TAG: Record<string, string> = {
   HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
@@ -79,7 +80,8 @@ function relTs(ts: string | null): string {
 
 function Picker() {
   const navigate = useNavigate();
-  const users = useQuery({ queryKey: ["users"], queryFn: () => api.users() });
+  const { range } = useRange();
+  const users = useQuery({ queryKey: ["users", range], queryFn: () => api.users(range) });
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("last");
   const [originFilter, setOriginFilter] = useState<"ALL" | "HUMAN" | "SIMULATED" | "AUTOMATION">("ALL");

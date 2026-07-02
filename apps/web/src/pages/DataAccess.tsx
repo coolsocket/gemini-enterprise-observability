@@ -5,6 +5,7 @@ import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
+import { useRange } from "../timerange";
 
 const ORIGIN_TAG: Record<string, string> = {
   HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
@@ -15,13 +16,14 @@ const ORIGIN_TAG: Record<string, string> = {
 export default function DataAccess() {
   const { origin } = useOrigin();
   const { engineId } = useEngine();
+  const { range } = useRange();
   const summary  = useQuery({
-    queryKey: ["v_data_access_summary", origin, engineId],
-    queryFn: () => api.view<DataAccessSummaryRow>("v_data_access_summary", origin, engineId),
+    queryKey: ["v_data_access_summary", origin, engineId, range],
+    queryFn: () => api.view<DataAccessSummaryRow>("v_data_access_summary", origin, engineId, range),
   });
   const timeline = useQuery({
-    queryKey: ["v_data_access", origin, engineId],
-    queryFn: () => api.view<DataAccessRow>("v_data_access", origin, engineId),
+    queryKey: ["v_data_access", origin, engineId, range],
+    queryFn: () => api.view<DataAccessRow>("v_data_access", origin, engineId, range),
   });
 
   // Simplified: hide autocomplete (noise) + session_files; surface chat/search/session/feedback

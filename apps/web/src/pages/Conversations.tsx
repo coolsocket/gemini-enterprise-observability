@@ -5,6 +5,7 @@ import { EmptyState, Panel } from "../components/Card";
 import { fmtTs } from "../components/DataTable";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
+import { useRange } from "../timerange";
 
 const STATUS_TAG: Record<string, string> = {
   STOP:        "bg-ggreen/15 text-ggreen border-ggreen/30",
@@ -26,9 +27,10 @@ type Filter = "all" | "matched" | "prompt_only";
 export default function Conversations() {
   const { origin } = useOrigin();
   const { engineId } = useEngine();
+  const { range } = useRange();
   const q = useQuery({
-    queryKey: ["v_conversations_with_response", origin, engineId],
-    queryFn: () => api.view<ConversationWithResponseRow>("v_conversations_with_response", origin, engineId),
+    queryKey: ["v_conversations_with_response", origin, engineId, range],
+    queryFn: () => api.view<ConversationWithResponseRow>("v_conversations_with_response", origin, engineId, range),
   });
 
   const [filter, setFilter] = useState<Filter>("all");
