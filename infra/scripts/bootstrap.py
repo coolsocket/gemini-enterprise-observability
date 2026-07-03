@@ -68,6 +68,18 @@ def fetch_agents_for_engine(engine_id: str) -> list[dict]:
         return []
 
 
+def fetch_license_configs() -> list[dict]:
+    """Pull real GE seat count + subscription tier. This IS a documented API despite
+    older guides claiming otherwise. Returns list of licenseConfig objects."""
+    url = f"https://discoveryengine.googleapis.com/v1alpha/projects/{PROJECT}/locations/global/licenseConfigs"
+    try:
+        data = _http(url)
+        return data.get("licenseConfigs", [])
+    except Exception as e:
+        print(f"  warn: could not fetch licenseConfigs ({e})")
+        return []
+
+
 def load_table(table_id: str, rows: list[dict]) -> None:
     """Truncate-and-load via load job (bypasses streaming buffer, idempotent)."""
     from google.cloud import bigquery
@@ -90,7 +102,8 @@ def load_table(table_id: str, rows: list[dict]) -> None:
 def seed_quota_config() -> None:
     from google.cloud import bigquery
     client = bigquery.Client(project=PROJECT)
-    # MERGE so we only insert if missing (don't overwrite user changes)
+
+    # 1) Static seeds (only if missing, don't overwrite user changes)
     for key, value in [("purchased_seats", PURCHASED_SEATS),
                         ("claimed_window_days", CLAIMED_WINDOW_DAYS)]:
         sql = f"""
@@ -101,7 +114,45 @@ def seed_quota_config() -> None:
         VALUES (s.k, s.v, CURRENT_TIMESTAMP(), 'bootstrap')
         """
         client.query(sql).result()
-    print(f"  seeded quota_config (idempotent)")
+
+    # 2) Dynamic: sync from live licenseConfigs API (overwrite — this is source of truth)
+    configs = fetch_license_configs()
+    if configs:
+        total = 0
+        by_tier: dict[str, int] = {}
+        for c in configs:
+            cnt = int(c.get("licenseCount", "0"))
+            total += cnt
+            tier = c.get("subscriptionTier", "UNKNOWN")
+            by_tier[tier] = by_tier.get(tier, 0) + cnt
+        # Write authoritative seat count from API
+        for k, v in [
+            ("license.total_seats", str(total)),
+            ("license.config_count", str(len(configs))),
+            ("license.raw", json.dumps(configs)),  # keep full data for debug
+        ]:
+            client.query(f"""
+                MERGE `{PROJECT}.{DATASET}.quota_config` t
+                USING (SELECT '{k}' k, @v v) s
+                ON t.key = s.k
+                WHEN MATCHED THEN UPDATE SET value = s.v, updated_at = CURRENT_TIMESTAMP(), updated_by = 'bootstrap-license-api'
+                WHEN NOT MATCHED THEN INSERT (key, value, updated_at, updated_by)
+                  VALUES (s.k, s.v, CURRENT_TIMESTAMP(), 'bootstrap-license-api')
+            """, job_config=bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("v", "STRING", v)]
+            )).result()
+        for tier, cnt in by_tier.items():
+            client.query(f"""
+                MERGE `{PROJECT}.{DATASET}.quota_config` t
+                USING (SELECT 'license.seats.{tier}' k, '{cnt}' v) s
+                ON t.key = s.k
+                WHEN MATCHED THEN UPDATE SET value = s.v, updated_at = CURRENT_TIMESTAMP(), updated_by = 'bootstrap-license-api'
+                WHEN NOT MATCHED THEN INSERT (key, value, updated_at, updated_by)
+                  VALUES (s.k, s.v, CURRENT_TIMESTAMP(), 'bootstrap-license-api')
+            """).result()
+        print(f"  seeded quota_config (licenseCount={total}, tiers={list(by_tier.keys())})")
+    else:
+        print("  seeded quota_config (no licenseConfigs found — using PURCHASED_SEATS env)")
 
 
 def main():

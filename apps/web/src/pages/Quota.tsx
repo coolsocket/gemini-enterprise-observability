@@ -176,6 +176,52 @@ export default function Quota() {
         </span>
       </div>
 
+      {/* NEW: Seat inventory (from real licenseConfigs API) */}
+      {d.config.find(c => c.key === "license.total_seats") && (
+        <Panel title="已购 Seats (真实 licenseConfigs API)">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-lg border border-info/30 bg-info/5 px-3 py-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-info/80">已购 seats 总数</div>
+              <div className="text-3xl font-semibold text-info tabular-nums mt-0.5">
+                {d.config.find(c => c.key === "license.total_seats")?.value ?? "?"}
+              </div>
+              <div className="text-[10px] text-ink-muted">licenseConfigs API</div>
+            </div>
+            <div className="rounded-lg border border-ggreen/30 bg-ggreen/5 px-3 py-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-ggreen/80">已用 seats</div>
+              <div className="text-3xl font-semibold text-ggreen tabular-nums mt-0.5">
+                {d.tiers.length}
+              </div>
+              <div className="text-[10px] text-ink-muted">
+                历史活跃 actor 数 · {
+                  d.config.find(c => c.key === "license.total_seats")?.value
+                    ? Math.round(d.tiers.length / Number(d.config.find(c => c.key === "license.total_seats")!.value) * 100)
+                    : "?"
+                }% 占用
+              </div>
+            </div>
+            <div className="rounded-lg border border-border-subtle bg-surface px-3 py-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-ink-muted">Subscription tier</div>
+              <div className="text-sm font-medium text-ink-primary mt-1.5">
+                {d.config.find(c => c.key.startsWith("license.seats.SUBSCRIPTION_"))?.key.replace("license.seats.SUBSCRIPTION_TIER_", "").replace(/_/g, " ") ?? "?"}
+              </div>
+              <div className="text-[10px] text-ink-muted mt-0.5">
+                {d.config.find(c => c.key === "license.config_count")?.value ?? "?"} configs
+              </div>
+            </div>
+            <div className="rounded-lg border border-border-subtle bg-surface px-3 py-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-ink-muted">数据源</div>
+              <div className="text-[11px] text-ink-secondary mt-1.5 font-mono">
+                v1alpha/licenseConfigs
+              </div>
+              <div className="text-[10px] text-ink-muted mt-0.5">
+                每次 bootstrap.py 同步一次
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
       {/* Per-feature totals grid */}
       <Panel title="今日全平台使用 vs 总配额">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
