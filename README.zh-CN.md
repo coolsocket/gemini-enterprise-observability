@@ -2,6 +2,8 @@
 
 > **语言**: [English](./README.md) · 中文
 
+![总览页 — 中文](./docs/screenshots/overview-zh.png)
+
 **Gemini Enterprise** 用户采纳 / 治理 / 审计的自部署 dashboard，
 Cloud Logging → BigQuery → React + FastAPI 全套打通。
 

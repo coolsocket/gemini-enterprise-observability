@@ -2,6 +2,8 @@
 
 > **Language**: English · [中文](./README.zh-CN.md)
 
+![Overview page — English](./docs/screenshots/overview-en.png)
+
 Self-hosted dashboard for **Gemini Enterprise** adoption, governance, and audit.
 Pipes Cloud Logging → BigQuery → React + FastAPI.
 
