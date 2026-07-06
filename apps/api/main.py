@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """GE Observability — FastAPI backend.
 
 Routes
@@ -28,6 +42,7 @@ log = logging.getLogger("ge-obs")
 
 PROJECT = os.environ.get("BQ_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
 DATASET = os.environ.get("BQ_DATASET", "ge_observability")
+SIM_PREFIX = os.environ.get("SIM_PREFIX", "sim-")
 if not PROJECT:
     raise RuntimeError("BQ_PROJECT (or GOOGLE_CLOUD_PROJECT) env var required")
 
@@ -307,7 +322,7 @@ def agent_deep_dive(agent_id: str) -> JSONResponse:
         events_sql = f"""
         SELECT timestamp,
                'OpenAgent' AS action,
-               REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') AS actor_email,
+               REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{SIM_PREFIX}', 'demo-') AS actor_email,
                jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid AS agent_id
         FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
         WHERE jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid = @aid
@@ -426,7 +441,7 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
               jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid  AS agent_id,
               jsonPayload.request.userevent.agentspaceinfo.agentinfo.name     AS agent_name
             FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
-            WHERE REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^vivo-sim-', 'demo-') = @email
+            WHERE REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{SIM_PREFIX}', 'demo-') = @email
               AND jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NULL
             ORDER BY timestamp DESC
             LIMIT 200""",

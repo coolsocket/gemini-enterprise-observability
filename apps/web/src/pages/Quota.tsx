@@ -1,3 +1,17 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -129,6 +143,13 @@ export default function Quota() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["quota-overview"] }),
   });
   const [filter, setFilter] = useState<"all" | "over" | "active">("active");
+  type SortKey = "email" | "tier" | "total" | string; // string = feature key
+  const [sortKey, setSortKey] = useState<SortKey>("total");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(k); setSortDir(k === "email" ? "asc" : "desc"); }
+  };
 
   // ⚠ All hooks MUST come before any early return.
   // Guard against undefined data inside memos rather than after them.
@@ -162,7 +183,19 @@ export default function Quota() {
   }));
   const filteredUsers = usersList
     .filter(u => filter === "all" ? true : filter === "over" ? u.any_over : u.total_used > 0)
-    .sort((a, b) => b.total_used - a.total_used);
+    .sort((a, b) => {
+      const mul = sortDir === "asc" ? 1 : -1;
+      if (sortKey === "email") return a.email.localeCompare(b.email) * mul;
+      if (sortKey === "tier")  return (a.tier === b.tier ? 0 : a.tier === "plus" ? -1 : 1) * mul;
+      if (sortKey === "total") return (a.total_used - b.total_used) * mul;
+      // feature-key: sort by utilization ratio (used/limit), 0 for missing
+      const ratio = (u: typeof a) => {
+        const c = u.features[sortKey];
+        return c && c.limit > 0 ? c.used / c.limit : 0;
+      };
+      return (ratio(a) - ratio(b)) * mul;
+    });
+  const sortArrow = (k: SortKey) => sortKey === k ? (sortDir === "asc" ? " ▲" : " ▼") : "";
 
   return (
     <div className="space-y-4 max-w-[1200px]">
@@ -301,12 +334,23 @@ export default function Quota() {
           <EmptyState title="无匹配用户" hint={filter === "active" ? "今日暂无活动" : filter === "over" ? "无人超额 🎉" : ""} />
         ) : (
           <div className="space-y-1">
-            {/* Header row */}
+            {/* Header row — clickable to sort */}
             <div className="flex items-center gap-2 px-2 py-1 text-[10px] uppercase tracking-wide text-ink-muted border-b border-border-subtle/40">
-              <div className="w-56 shrink-0">用户</div>
-              <div className="w-14 shrink-0 text-center">Tier</div>
+              <button
+                onClick={() => toggleSort("email")}
+                className={`w-56 shrink-0 text-left hover:text-ink-primary ${sortKey === "email" ? "text-info" : ""}`}
+              >用户{sortArrow("email")}</button>
+              <button
+                onClick={() => toggleSort("tier")}
+                className={`w-14 shrink-0 text-center hover:text-ink-primary ${sortKey === "tier" ? "text-info" : ""}`}
+              >Tier{sortArrow("tier")}</button>
               {FEATURE_ORDER.slice(0, 4).map(f => (
-                <div key={f} className="flex-1 text-center">{FEATURE_META[f].icon} {FEATURE_META[f].label}</div>
+                <button
+                  key={f}
+                  onClick={() => toggleSort(f)}
+                  className={`flex-1 text-center hover:text-ink-primary ${sortKey === f ? "text-info" : ""}`}
+                  title="按使用率排序"
+                >{FEATURE_META[f].icon} {FEATURE_META[f].label}{sortArrow(f)}</button>
               ))}
             </div>
             {filteredUsers.map(u => (

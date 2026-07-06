@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Render and apply parameterized BQ views.
 
 Usage:
@@ -10,6 +24,9 @@ Environment variables:
     SIM_PATTERN   LIKE pattern that classifies an actor as SIMULATED
                   (default: '__sim_disabled__' — i.e. nothing matches)
                   Set to e.g. 'mycorp-sim-%' if you seeded sim service accounts.
+    SIM_PREFIX    Prefix stripped from principal emails at query time so that
+                  seed/simulated accounts display as generic actors.
+                  (default: 'sim-'). Set to your seed convention, e.g. 'demo-'.
     DRY_RUN       if 'true', print SQL and exit
 """
 from __future__ import annotations
@@ -21,6 +38,7 @@ from pathlib import Path
 PROJECT = os.environ.get("PROJECT") or os.environ.get("BQ_PROJECT")
 DATASET = os.environ.get("DATASET") or os.environ.get("BQ_DATASET", "ge_observability")
 SIM_PATTERN = os.environ.get("SIM_PATTERN", "__sim_disabled__")
+SIM_PREFIX = os.environ.get("SIM_PREFIX", "sim-")
 DRY_RUN = os.environ.get("DRY_RUN", "").lower() == "true"
 
 if not PROJECT:
@@ -32,7 +50,8 @@ sql = template.read_text()
 sql = (sql
        .replace("{{PROJECT}}", PROJECT)
        .replace("{{DATASET}}", DATASET)
-       .replace("{{SIM_PATTERN}}", SIM_PATTERN))
+       .replace("{{SIM_PATTERN}}", SIM_PATTERN)
+       .replace("{{SIM_PREFIX}}", SIM_PREFIX))
 
 if DRY_RUN:
     print(sql)
