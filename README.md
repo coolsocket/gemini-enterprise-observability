@@ -2,6 +2,18 @@
 
 > **Language**: English · [中文](./README.zh-CN.md)
 
+[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fcoolsocket%2Fgemini-enterprise-observability&cloudshell_git_branch=main&cloudshell_workspace=.&cloudshell_tutorial=docs%2FDEPLOYMENT.md&show=terminal)
+
+**Recommended install path** — click the button above. Cloud Shell opens with your Google-account auth already active, our repo pre-cloned, and `gcloud` / `terraform` / `python3` / `npm` pre-installed. Then in the terminal:
+
+```bash
+make install         # venv + npm deps + copies .env.example → .env + doctor report
+make wizard          # interactive prompts fill in project ID / region / etc
+make deploy-infra    # provision + build + bootstrap  (needs project Owner — see DEPLOYMENT.md)
+```
+
+Local install works too (see [Quick start](#quick-start) below) but requires you to have the same tools + auth set up on your own machine.
+
 ![Overview page — English](./docs/screenshots/overview-en.png)
 
 Self-hosted dashboard for **Gemini Enterprise** adoption, governance, and audit.

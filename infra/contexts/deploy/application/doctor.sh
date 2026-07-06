@@ -88,12 +88,23 @@ echo ""
 echo "${B}==> Authentication${N}"
 
 # --- gcloud user login ---
+# Set DOCTOR_AUTOAUTH=n to skip the auto-spawn prompts (e.g. CI). Default is
+# interactive: if creds are missing, prompt Y/n and spawn the flow with
+# stdio inheritance so the browser OAuth loop completes cleanly.
 if command -v gcloud >/dev/null 2>&1; then
   account=$(gcloud config get-value account 2>/dev/null || true)
   if [ -n "$account" ] && [ "$account" != "(unset)" ]; then
     ok "gcloud active account: ${account}"
   else
-    bad "gcloud not authed" "run: gcloud auth login"
+    bad "gcloud not authed"
+    if [ -t 0 ] && [ "${DOCTOR_AUTOAUTH:-y}" != "n" ]; then
+      read -r -p "     Run \`gcloud auth login\` now? [Y/n] " reply
+      if [ "$reply" != "n" ] && [ "$reply" != "N" ]; then
+        gcloud auth login
+      fi
+    else
+      echo "     ${D}→ run: gcloud auth login${N}"
+    fi
   fi
 
   # --- ADC (main.py + bootstrap.py use google.auth.default) ---
@@ -105,8 +116,15 @@ if command -v gcloud >/dev/null 2>&1; then
       ok "ADC via ~/.config/gcloud/application_default_credentials.json"
     fi
   else
-    bad "ADC not configured (Python scripts + FastAPI need this)" \
-        "run: gcloud auth application-default login"
+    bad "ADC not configured (Python scripts + FastAPI need this)"
+    if [ -t 0 ] && [ "${DOCTOR_AUTOAUTH:-y}" != "n" ]; then
+      read -r -p "     Run \`gcloud auth application-default login\` now? [Y/n] " reply
+      if [ "$reply" != "n" ] && [ "$reply" != "N" ]; then
+        gcloud auth application-default login
+      fi
+    else
+      echo "     ${D}→ run: gcloud auth application-default login${N}"
+    fi
   fi
 fi
 

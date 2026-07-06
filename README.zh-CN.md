@@ -2,6 +2,18 @@
 
 > **语言**: 中文 · [English](./README.md)
 
+[![在 Cloud Shell 中打开](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fcoolsocket%2Fgemini-enterprise-observability&cloudshell_git_branch=main&cloudshell_workspace=.&cloudshell_tutorial=docs%2FDEPLOYMENT.zh-CN.md&show=terminal)
+
+**推荐安装路径** —— 点上面的按钮。Cloud Shell 会自动用你 Google 账号 auth、预 clone 好仓库、预装 `gcloud` / `terraform` / `python3` / `npm`。然后在终端里:
+
+```bash
+make install         # venv + npm 依赖 + 复制 .env.example → .env + doctor 报告
+make wizard          # 交互式问 project ID / region 等,写 .env
+make deploy-infra    # provision + build + bootstrap  (需要项目 Owner —— 详见 DEPLOYMENT.zh-CN.md)
+```
+
+本地装也行 (见下面 [快速开始](#快速开始)),但你得自己在本机装好那套工具 + auth。
+
 ![总览页 — 中文](./docs/screenshots/overview-zh.png)
 
 **Gemini Enterprise** 的自托管仪表盘 —— 采用度、治理、审计。Cloud Logging → BigQuery → React + FastAPI。

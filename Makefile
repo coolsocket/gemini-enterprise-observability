@@ -1,6 +1,6 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
         tf-init tf-plan tf-apply tf-import-orphans preflight views bootstrap image \
-        deploy-infra deploy-views deploy resume doctor all clean
+        deploy-infra deploy-views deploy resume doctor wizard all clean
 
 # Auto-include per-project config from .env (if present) and export every
 # variable to subprocesses (uvicorn / terraform / gcloud). Users
@@ -22,6 +22,12 @@ PORT ?= 8000
 # actionable hints. Always exit 0 (informational).
 doctor:
 	@bash infra/contexts/deploy/application/doctor.sh
+
+# Interactive .env wizard — pure Bash, zero deps. Prompts for BQ_PROJECT /
+# REGION / BQ_LOCATION / DATASET / SIM_PREFIX / PORT and writes .env.
+# Backs up any existing .env to .env.bak.
+wizard:
+	@bash infra/contexts/deploy/application/wizard.sh
 
 # First-time setup: venv + Python deps + npm deps + .env bootstrap + doctor.
 # Idempotent — safe to re-run. Doesn't do gcloud auth for you (interactive).
