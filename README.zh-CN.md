@@ -212,20 +212,23 @@ gcloud run services proxy ge-observability --port 8080 --region us-central1
 open http://localhost:8080
 ```
 
-### 一键恢复: `make resume`
+### 一键 view 恢复: `make resume`
 
-失败后 90% 的场景: upstream 推了个修复,你只需要 `git pull && 重跑 views`。**`make resume PROJECT=<p>` 一条命令搞定**:
+view 建失败后重试的 90% 场景:
 
 ```bash
+# 想要上游修复自己 pull (Make 不会替你做):
+git pull
+
+# 然后一条命令:
 make resume PROJECT=responsive-lens-421108 DATASET=ge_observability
 ```
 
-内部做:
-1. `git pull --ff-only origin main` (没本地改动就安全;离线 / 非 ff 跳过)
-2. 通过 `bq show` 查现有 dataset 的**真实 `BQ_LOCATION`** —— 这样 preflight 的 region-mismatch gate 不会误伤已经在 GCP 上的现状
-3. 跑 `apply_views.py`,幂等:21 个 `CREATE OR REPLACE VIEW` 无变化就 no-op,有 schema-drift / 依赖 fix 时精准重建受影响的那几个
+`make resume` 内部做:
+1. 通过 `bq show` 查现有 dataset 的**真实 `BQ_LOCATION`** —— 这样 preflight 的 region-mismatch gate 不会误伤已经在 GCP 上的现状
+2. 跑 `apply_views.py`,幂等:21 个 `CREATE OR REPLACE VIEW` 无变化就 no-op,有 schema-drift / 依赖 fix 时精准重建受影响的那几个
 
-耗时: ~30-60 秒。不动 Terraform / 镜像 / bootstrap —— 那些需要 `make deploy-infra`。
+耗时: ~30-60 秒。**不动 git / Terraform / 镜像 / bootstrap** —— 那些都你自己控制。
 
 ### 失败后恢复 (幂等性一览)
 

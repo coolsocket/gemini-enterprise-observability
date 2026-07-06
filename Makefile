@@ -156,15 +156,12 @@ deploy: py-deps tf-apply image bootstrap views
 	@echo ""
 	@echo "✓ Deploy complete."
 
-# One-command recovery after a failed deploy — the common case is a schema-
-# drift fix in views has been pushed and the operator just needs to `git pull
-# && make deploy-views`. This target does both, and auto-detects the existing
-# dataset's BQ_LOCATION from GCP (so preflight's region-mismatch gate doesn't
-# trip on state that already exists). Safe to re-run.
-resume: check-project
-	@echo "→ Pulling latest from origin..."
-	@git pull --ff-only origin main || echo "  (git pull skipped — non-ff or offline; using local tree)"
-	@echo ""
+# One-command recovery from a failed views apply. Auto-detects the existing
+# dataset's actual BQ_LOCATION from GCP (so preflight's region-mismatch gate
+# doesn't trip on state that already exists) and re-runs apply_views.py
+# idempotently. Does NOT touch git — pull upstream fixes yourself first if
+# you want the latest SQL. Safe to re-run.
+resume: check-project py-deps
 	@echo "→ Detecting existing dataset location on GCP..."
 	@detected_loc=$$(bq --project_id=$(PROJECT) show --format=json $(DATASET) 2>/dev/null | \
 	    python3 -c "import json,sys; print(json.load(sys.stdin).get('location','') or '')" 2>/dev/null); \
@@ -174,7 +171,6 @@ resume: check-project
 	  else \
 	    echo "  Dataset '$(DATASET)' does not exist — using BQ_LOCATION=$(BQ_LOCATION)."; \
 	  fi; \
-	  $(MAKE) py-deps; \
 	  BQ_LOCATION=$${BQ_LOCATION:-$(BQ_LOCATION)} PROJECT=$(PROJECT) DATASET=$(DATASET) \
 	    $(VENV)/bin/python3 infra/scripts/apply_views.py
 	@echo ""
