@@ -69,16 +69,107 @@ import re as _re
 sql_no_comments = _re.sub(r"--[^\n]*", "", sql)
 raw = [s.strip() for s in sql_no_comments.split(";")]
 statements = [s for s in raw if "CREATE OR REPLACE" in s.upper()]
-ok = 0
-errors: list[tuple[int, str]] = []
-for i, stmt in enumerate(statements):
+
+
+def _view_name(stmt: str) -> str:
+    """Extract the target view name from a CREATE OR REPLACE VIEW statement."""
+    m = _re.search(r"CREATE\s+OR\s+REPLACE\s+VIEW\s+`?([^`\s(]+)`?", stmt, _re.IGNORECASE)
+    return m.group(1).split(".")[-1] if m else "unknown"
+
+
+def _missing_table(err: str) -> str | None:
+    """If a BQ error is a 404-not-found on a specific table, return the table
+    name. Otherwise None. Used to distinguish 'waiting for logs to flow' from
+    real syntax/permission problems."""
+    m = _re.search(r"Not found: Table [^\s]+\.([A-Za-z_][A-Za-z0-9_]*)", err)
+    return m.group(1) if m else None
+
+
+# Tables auto-created by GCP when the first matching log entry flows through
+# the sink. On a truly fresh deploy these do not exist yet — that's expected,
+# not an error. Categorize them so the summary is actionable.
+SINK_TARGETS = {
+    "cloudaudit_googleapis_com_activity",
+    "cloudaudit_googleapis_com_data_access",
+    "cloudaudit_googleapis_com_system_event",
+    "discoveryengine_googleapis_com_gemini_enterprise_user_activity",
+    "discoveryengine_googleapis_com_gen_ai_choice",
+    "discoveryengine_googleapis_com_gen_ai_user_message",
+}
+
+# Tables created by `terraform apply` (see terraform/main.tf § 3). If any of
+# these are missing, the operator forgot to run tf-apply first — that's a
+# real error, but with a specific, well-known fix.
+TERRAFORM_TABLES = {
+    "engine_metadata",
+    "datastore_metadata",
+    "resources_alive",
+    "quota_config",
+    "user_tier",
+    "snapshot_meta",
+}
+
+ok: list[str] = []
+skipped_waiting_logs: list[tuple[str, str]] = []       # (view, missing_table)
+skipped_missing_view_dep: list[tuple[str, str]] = []   # (view, missing_view — downstream of above)
+skipped_missing_tf_table: list[tuple[str, str]] = []   # (view, missing_metadata_table)
+real_errors: list[tuple[str, str]] = []                # everything else
+
+for stmt in statements:
+    view = _view_name(stmt)
     try:
         client.query(stmt + ";").result()
-        ok += 1
+        ok.append(view)
     except Exception as e:
-        errors.append((i, str(e)[:200]))
+        err = str(e)[:400]
+        missing = _missing_table(err)
+        if missing in SINK_TARGETS:
+            skipped_waiting_logs.append((view, missing))
+        elif missing in TERRAFORM_TABLES:
+            skipped_missing_tf_table.append((view, missing))
+        elif missing and missing.startswith("v_"):
+            # A downstream view whose dependency also failed — cascade
+            skipped_missing_view_dep.append((view, missing))
+        else:
+            real_errors.append((view, err))
 
-print(f"applied {ok}/{len(statements)} statements")
-for i, err in errors:
-    print(f"  ERR stmt {i}: {err}")
-sys.exit(1 if errors else 0)
+total = len(statements)
+print(f"applied {len(ok)}/{total} views")
+
+if skipped_waiting_logs:
+    print()
+    print(f"⏳ {len(skipped_waiting_logs)} view(s) skipped — waiting for log-sink tables:")
+    seen_tables = sorted({t for _, t in skipped_waiting_logs})
+    for t in seen_tables:
+        print(f"     • {t}")
+    print("   These tables are auto-created by BigQuery the first time a matching log")
+    print("   entry lands in the sink. Enable GE Console toggles per engine (OpenTelemetry")
+    print("   Instrumentation, Prompt & Response Logging), send a bit of traffic, then re-")
+    print(f"   run: PROJECT={PROJECT} DATASET={DATASET} python3 infra/scripts/apply_views.py")
+
+if skipped_missing_tf_table:
+    print()
+    print(f"⚠ {len(skipped_missing_tf_table)} view(s) skipped — Terraform-managed table missing:")
+    seen = sorted({t for _, t in skipped_missing_tf_table})
+    for t in seen:
+        print(f"     • {t}")
+    print("   These are created by `terraform apply` (see terraform/main.tf § 3). Run:")
+    print(f"     make tf-apply PROJECT={PROJECT} DATASET={DATASET}")
+    print("   then re-run this command.")
+
+if skipped_missing_view_dep:
+    print()
+    print(f"⚠ {len(skipped_missing_view_dep)} view(s) skipped — depend on views above that couldn't be created:")
+    for view, dep in skipped_missing_view_dep:
+        print(f"     • {view}  (needs {dep})")
+
+if real_errors:
+    print()
+    print(f"❌ {len(real_errors)} view(s) failed with unexpected errors:")
+    for view, err in real_errors:
+        print(f"     • {view}: {err}")
+
+# Exit 0 if the only failures are "waiting for logs" — those are expected on
+# fresh deploys and the operator should just re-run later. Missing Terraform
+# tables and real errors are both exit-1: the operator needs to act.
+sys.exit(1 if (real_errors or skipped_missing_tf_table) else 0)

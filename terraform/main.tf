@@ -241,6 +241,21 @@ resource "google_project_iam_member" "dashboard_de_viewer" {
 }
 
 # ============================================================
+# 4b) Artifact Registry repo — receives the dashboard container image.
+# (gcr.io is deprecated in favor of Artifact Registry; new GCP projects
+# don't get gcr.io by default.)
+# ============================================================
+resource "google_artifact_registry_repository" "dashboard" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = var.ar_repo
+  format        = "DOCKER"
+  description   = "GE Observability dashboard container images"
+
+  depends_on = [google_project_service.required]
+}
+
+# ============================================================
 # 5) Cloud Run service for the dashboard
 # ============================================================
 resource "google_cloud_run_v2_service" "dashboard" {
@@ -343,22 +358,35 @@ output "dataset_full_name" {
 output "next_steps" {
   value = <<-EOT
 
-    Terraform applied successfully. Next manual steps:
+    Terraform applied successfully. Deploy order from a fresh project:
 
-    1. Open GE Admin Console for each engine and enable:
-       - Enable Feedback (if available)
-       - Enable OpenTelemetry Instrumentation
-       - Enable Prompt and Response Logging
+    1. Build + push the container image to Artifact Registry:
+       gcloud builds submit --project=${var.project_id} \\
+         --tag ${var.container_image} .
 
-    2. Bootstrap the views + metadata tables:
+    2. Seed metadata tables + fetch live licenseConfigs:
+       PROJECT=${var.project_id} DATASET=${google_bigquery_dataset.ge_observability.dataset_id} \\
+       python3 infra/scripts/bootstrap.py
+
+    3. Open GE Admin Console for each engine and enable:
+       - OpenTelemetry Instrumentation      (generates trace IDs)
+       - Prompt and Response Logging        (writes gen_ai.* logs)
+       - Feedback                           (optional)
+
+    4. Send a bit of traffic (chat / deep research / notebook click) so the
+       Logs Router sink actually creates its target tables in BigQuery. Wait
+       ~2-5 minutes for logs to land.
+
+    5. Apply the analytical views. Idempotent — safe to re-run:
        PROJECT=${var.project_id} DATASET=${google_bigquery_dataset.ge_observability.dataset_id} \\
        python3 infra/scripts/apply_views.py
 
-    3. Build + push the container image:
-       cd apps/web && npm run build && cd ../..
-       gcloud builds submit --tag ${var.container_image}
+    6. Optional: set deploy_cloud_run = true in terraform.tfvars, add invokers
+       under iap_invokers, and re-apply. Otherwise 'make serve' locally.
 
-    4. If deploy_cloud_run = true, the service should be live at the URL above.
-       Configure IAP via Cloud Console (Security → Identity-Aware Proxy).
+    The two-phase Makefile alias:
+      make deploy-infra PROJECT=${var.project_id}   # steps 1-2 above
+      # (manual steps 3-4)
+      make deploy-views PROJECT=${var.project_id}   # step 5
   EOT
 }

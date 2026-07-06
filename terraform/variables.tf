@@ -48,9 +48,15 @@ variable "service_name" {
 }
 
 variable "container_image" {
-  description = "Container image for the dashboard (gcr.io/.../ge-observability:tag)"
+  description = "Container image for the dashboard. Default targets Artifact Registry (<region>-docker.pkg.dev/<project>/<repo>/dashboard:latest); pass the value from the Makefile IMAGE variable."
   type        = string
-  default     = "gcr.io/cloudrun/hello" # placeholder; replace with your built image
+  default     = "us-docker.pkg.dev/cloudrun/container/hello" # placeholder; overridden by Makefile
+}
+
+variable "ar_repo" {
+  description = "Artifact Registry repository name used for the dashboard container image."
+  type        = string
+  default     = "ge-observability"
 }
 
 variable "max_instances" {
@@ -60,9 +66,9 @@ variable "max_instances" {
 }
 
 variable "deploy_cloud_run" {
-  description = "If true, deploy Cloud Run service. Set false to only provision BQ/sink/IAM."
+  description = "If true, deploy Cloud Run service. Default false so first-time deployers can iterate locally (make api-run) before spending on Cloud Run. Set true once you're ready to expose the dashboard."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "iap_invokers" {

@@ -30,9 +30,11 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import urllib.request
+
+import google.auth
+import google.auth.transport.requests
 
 PROJECT = os.environ.get("PROJECT") or os.environ.get("BQ_PROJECT")
 DATASET = os.environ.get("DATASET") or os.environ.get("BQ_DATASET", "ge_observability")
@@ -45,13 +47,28 @@ if not PROJECT:
     sys.exit(1)
 
 
-def _gcloud_token() -> str:
-    return subprocess.check_output(["gcloud", "auth", "print-access-token"], text=True).strip()
+_creds = None
+
+
+def _access_token() -> str:
+    """Get an OAuth token via ADC (works in containers, CI, and locally).
+
+    Uses google.auth.default() so it matches how google-cloud-bigquery picks
+    its identity — no shell-out to `gcloud`, no requirement that the CLI is
+    on PATH. Refreshes the cached credential when the token expires.
+    """
+    global _creds
+    if _creds is None:
+        _creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    if not _creds.valid:
+        _creds.refresh(google.auth.transport.requests.Request())
+    return _creds.token
 
 
 def _http(url: str, *, method: str = "GET", body: dict | None = None) -> dict:
     req = urllib.request.Request(url, method=method)
-    req.add_header("Authorization", f"Bearer {_gcloud_token()}")
+    req.add_header("Authorization", f"Bearer {_access_token()}")
+    req.add_header("x-goog-user-project", PROJECT)
     if body is not None:
         req.add_header("Content-Type", "application/json")
         req.data = json.dumps(body).encode()

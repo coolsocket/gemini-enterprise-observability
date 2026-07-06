@@ -47,3 +47,4 @@ service-account-*.json
 # Cloud Run local emulators
 .cloudbuild/
 .gstack/
+.canvas/

@@ -80,46 +80,131 @@ Answers questions like:
 
 ## Deploying to your GCP project
 
-**One-shot** (assumes `gcloud` authed, `terraform` installed, GE engine already provisioned):
+### Prerequisites
+
+Before you start, make sure you have all of these:
+
+**Local tools on `PATH`**
+- `gcloud` (Cloud SDK ≥ 460)
+- `terraform` ≥ 1.5
+- `python3` ≥ 3.11 + `pip`
+- `npm` ≥ 8 (only needed if you want to iterate on the frontend; the container build handles it)
+- `make`
+
+**GCP project state**
+- Project exists and billing is enabled (`gcloud beta billing projects link ...`)
+- Your caller has **Owner** or (Editor + Security Admin + Project IAM Admin) on the project — Terraform enables APIs and grants roles
+- **Gemini Enterprise engine already provisioned** in the target project — this repo observes an existing GE deployment; it doesn't create one
+- **Cloud Build API pre-enabled** so `make image` works on the first pass: `gcloud services enable cloudbuild.googleapis.com --project=<project>` (Terraform enables it too, but if you run the deploy chain out of order this bites first)
+
+**Authentication (both required)**
+- `gcloud auth login` — for the Terraform + Cloud Build CLIs
+- `gcloud auth application-default login` — for the Python helpers (`apply_views.py`, `bootstrap.py`, and the FastAPI backend) which all use ADC
+
+### Two-phase deploy (recommended for fresh projects)
 
 ```bash
 git clone https://github.com/coolsocket/gemini-enterprise-observability
 cd gemini-enterprise-observability
-make deploy PROJECT=my-project REGION=us-central1
+
+# ---------- Phase A: provision + image + metadata ----------
+make deploy-infra PROJECT=my-project REGION=us-central1
+# Runs: terraform apply → gcloud builds submit → bootstrap.py
+
+# ---------- Manual step ----------
+# In GE Admin Console, per engine, enable:
+#   - OpenTelemetry Instrumentation      (generates trace IDs)
+#   - Prompt & Response Logging          (writes gen_ai.* logs)
+#   - Feedback                           (optional)
+# See docs/GE_CONSOLE_SETUP.md
+#
+# Then send a bit of traffic (chat / deep research / open a notebook) and
+# wait ~2-5 min for logs to land in BigQuery.
+
+# ---------- Phase B: apply the analytical views ----------
+make deploy-views PROJECT=my-project
 ```
 
-This runs in order:
+The split matters: BigQuery only auto-creates the sink target tables
+(`cloudaudit_googleapis_com_data_access`, `discoveryengine_googleapis_com_*`)
+after the first matching log lands. `make deploy-views` is idempotent — safe
+to re-run — and reports any views still waiting for a source table so you
+know exactly what to wait for.
 
-1. `terraform apply` — enables 9 APIs, creates BQ dataset + 5 metadata tables + sink + audit config + service account + Cloud Run + optional Scheduled Query
-2. `gcloud builds submit` — builds + pushes the container image
-3. `apply_views.py` — renders + applies 18 BigQuery views (templated with `{{PROJECT}}` / `{{DATASET}}` / `{{SIM_PATTERN}}`)
-4. `bootstrap.py` — ingests `engine_metadata`, `datastore_metadata`, `resources_alive` via the Discovery Engine API; seeds `quota_config`
+### Preview the dashboard
 
-Two manual steps remain:
+Default is **local-only** (`deploy_cloud_run = false`) so you can iterate
+without spending on Cloud Run:
 
-1. **Enable GE Admin Console toggles** per engine — see [`docs/GE_CONSOLE_SETUP.md`](./docs/GE_CONSOLE_SETUP.md):
-   - Enable OpenTelemetry Instrumentation (generates trace IDs)
-   - Enable Prompt & Response Logging (writes `gen_ai.user.message` and `gen_ai.choice`)
-   - Enable Feedback (optional)
-2. **Add invokers** to `terraform/terraform.tfvars` (`iap_invokers = ["user:alice@example.com", …]`), then `make tf-apply` again
+```bash
+make serve PROJECT=my-project    # http://127.0.0.1:8000
+```
 
-Then open the dashboard:
+Ready to expose it? In `terraform/terraform.tfvars`:
+
+```hcl
+deploy_cloud_run = true
+iap_invokers     = ["user:alice@example.com", "group:ge-users@example.com"]
+```
+
+then `make tf-apply PROJECT=my-project` and open:
 
 ```bash
 gcloud run services proxy ge-observability --port 8080 --region us-central1
 open http://localhost:8080
 ```
 
-### Step-by-step (if `make deploy` fails partway)
+### Step-by-step (debugging)
 
 ```bash
 make tf-plan   PROJECT=my-project    # preview infra
-make tf-apply  PROJECT=my-project    # provision infra
-# (manually flip GE Console toggles here; wait a few min for first logs)
-make image     PROJECT=my-project    # build + push container
-make views     PROJECT=my-project    # apply 18 BQ views
-make bootstrap PROJECT=my-project    # ingest metadata
+make tf-apply  PROJECT=my-project    # provision infra + Artifact Registry repo
+make image     PROJECT=my-project    # build + push container to AR
+make bootstrap PROJECT=my-project    # seed metadata tables
+# (manually flip GE Console toggles + generate a bit of traffic)
+make views     PROJECT=my-project    # apply BQ views (re-run until 100%)
 ```
+
+### Troubleshooting
+
+**`make views` reports "N view(s) skipped — waiting for log-sink tables"**
+Expected on a fresh project. The listed tables (`cloudaudit_googleapis_com_*`,
+`discoveryengine_googleapis_com_*`) are created by BigQuery only after the
+Logs Router sink actually delivers a matching row. Enable the GE Console
+toggles, send a couple of chat messages, wait ~2 minutes, and re-run
+`make views` — the count drops until all applied.
+
+**`gcloud builds submit` fails with `NOT_FOUND` on `gcr.io/...`**
+`gcr.io` (Container Registry) was deprecated by Google in February 2024;
+projects created after that don't have it. This repo now uses Artifact
+Registry — check that you're on a recent `main` and that the `IMAGE`
+variable resolves to `<region>-docker.pkg.dev/...`. Run `make tf-apply`
+first so Terraform creates the AR repo before `make image`.
+
+**Cloud Run URL returns 403**
+Add your callers to `iap_invokers` in `terraform.tfvars` and re-apply.
+Without IAP: use `roles/run.invoker` on the specific principals. With IAP:
+use the `principal://` form. If it still 403s, check whether Cloud Run
+requires authentication (`gcloud run services describe ge-observability
+--region <r> --format="value(spec.template.spec.containers[0].image)"`).
+
+**`make views` fails with `Not found: Table quota_config`**
+You skipped `make bootstrap`. That step creates the metadata tables the
+views reference (also created idempotently by `terraform apply` — if you
+see this after a successful apply, re-check that `PROJECT` and `DATASET`
+match on both invocations).
+
+**API returns 403 on BigQuery queries at runtime**
+The runtime SA (`ge-observability-sa@…`) needs `roles/bigquery.jobUser`
+project-wide and `roles/bigquery.dataViewer` on the dataset. Terraform
+grants both — if you renamed the dataset outside Terraform, re-apply so
+the IAM binding follows.
+
+**`bootstrap.py` fails with `licenseConfigs` 404 or 403**
+Your GE deployment may not have a `licenseConfigs` API response yet (very
+new tenants) or the caller lacks `roles/discoveryengine.viewer`. The
+script degrades gracefully — the seat count on the Quota page will fall
+back to whatever's already in `quota_config`.
 
 ---
 
@@ -228,6 +313,7 @@ Cloud Run runs with `--no-allow-unauthenticated`. Only `roles/run.invoker` holde
 
 Keep this list current when changing user-visible behavior, quota semantics, or dashboard data model. Newest first. See `git log` for full detail.
 
+- **2026-07-06** — Deploy pipeline fixes for first-time deployers (simulated from scratch, hit 3 blockers): (a) `apply_views.py` now categorizes missing-source-table errors as "waiting for log-sink tables" (idempotent, safe to re-run once logs flow) vs "missing Terraform-managed table" (actionable: run `tf-apply`) vs "real errors". (b) `bootstrap.py` migrated from `subprocess("gcloud auth print-access-token")` to `google.auth.default()` — no gcloud CLI needed in containers/CI. (c) Container image moved from deprecated `gcr.io/` to Artifact Registry (`<region>-docker.pkg.dev/...`); Terraform now provisions a `google_artifact_registry_repository`. (d) `make deploy` split into two-phase `deploy-infra` + `deploy-views` reflecting the fact that BQ sink target tables only exist after GE toggles ON + traffic flows. (e) `deploy_cloud_run` default flipped to `false` so first-time deployers can iterate locally. (f) README got a full Prerequisites section + Troubleshooting covering the 5 common failure modes.
 - **2026-07-06** — Removed `image_gen`, `video_gen`, `idea_gen` from the Quota dashboard. GE runs those generations inside Google infrastructure and does not emit customer audit logs, so we had been relying on a prompt-keyword heuristic that misclassified "summarize this video" style prompts. Underlying tier_limit rows in `quota_config` preserved for revival if GE ever exposes real per-feature counters.
 - **2026-07-06** — Quota total now computed from **purchased seats** (`licenseConfigs`), not active-user count. Previously an org that bought 20 seats but had 10 active users showed only 10× per-tier limit; now it correctly shows 20× (assigned tiers honored, remaining seats fall back to `quota.default_tier`). Per-feature card label changed from "eligible" to "seats".
 - **2026-07-06** — NotebookLM quota count now includes only user-initiated write ops (`Create*`/`Update*`/`Delete*`/`BatchCreate*`/`Generate*`), excluding the ~20 background `Get*`/`List*`/`BatchGet*` calls the UI fires per notebook open. Per-user daily counts now match perceived actions. Also: seat count (`licenseConfigs` API) auto-refreshes every 24h from a FastAPI background task, tunable via `LICENSE_REFRESH_INTERVAL_SEC`; exposed via `POST /api/refresh/seats`.
