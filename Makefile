@@ -1,6 +1,13 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
         tf-init tf-plan tf-apply tf-import-orphans preflight views bootstrap image \
-        deploy-infra deploy-views deploy resume all clean
+        deploy-infra deploy-views deploy resume doctor all clean
+
+# Auto-include per-project config from .env (if present) and export every
+# variable to subprocesses (uvicorn / terraform / gcloud). Users
+# `cp .env.example .env`, edit once, then run `make serve` etc without
+# prefixing BQ_PROJECT= every time. CLI args still override .env values.
+-include .env
+export
 
 PY ?= python3
 VENV := .venv
@@ -9,7 +16,31 @@ PORT ?= 8000
 # ============================================================
 # Local development
 # ============================================================
-install: web-install py-deps
+
+# Non-destructive environment check. Reports Python/Node/gcloud/terraform
+# versions, ADC state, venv/node_modules/.env presence. Prints ✓/⚠/✗ with
+# actionable hints. Always exit 0 (informational).
+doctor:
+	@bash infra/scripts/doctor.sh
+
+# First-time setup: venv + Python deps + npm deps + .env bootstrap + doctor.
+# Idempotent — safe to re-run. Doesn't do gcloud auth for you (interactive).
+install: py-deps web-install
+	@if [ ! -f .env ] && [ -f .env.example ]; then \
+	  echo ""; \
+	  echo "→ Creating .env from .env.example"; \
+	  cp .env.example .env; \
+	  echo "  ${EDITOR:-vi} .env    # fill in BQ_PROJECT + REGION + BQ_LOCATION"; \
+	fi
+	@echo ""
+	@echo "→ Verifying environment..."
+	@bash infra/scripts/doctor.sh
+	@echo ""
+	@echo "✓ Install complete. Next steps:"
+	@echo "  1. Edit .env with your project ID (if the file was just created)"
+	@echo "  2. gcloud auth application-default login  (if the ADC check above was ✗)"
+	@echo "  3. make serve                              (local preview)"
+	@echo "     or: make deploy-infra                   (full GCP deploy)"
 
 # Python venv only (used by deploy chain; no node needed)
 py-deps:
