@@ -243,6 +243,36 @@ gcloud run services proxy ge-observability --port 8080 --region us-central1
 open http://localhost:8080
 ```
 
+### Resuming after a failure (idempotency map)
+
+All deploy steps are idempotent — none of them delete data. But some are
+smart (skip work) and some always re-run. Use this to shortcut re-tries
+instead of running the whole chain:
+
+| Step | Smart re-run? | Cost of re-run | Details |
+|---|---|---|---|
+| `preflight`             | n/a  | ~5 s  | Read-only scan; changes nothing. |
+| `tf-apply`              | ✅ **fully smart** | ~10-30 s | Terraform diffs state; already-present + unchanged resources are no-ops. |
+| `image`                 | ❌ **always rebuilds** | 1-3 min | `gcloud builds submit --tag=:latest` doesn't hash source. **Set `SKIP_IMAGE=true`** when you know the image is fresh (e.g. only tweaked Terraform). |
+| `bootstrap`             | mostly | ~5 s | Metadata tables TRUNCATE-load (small); `observabilityConfig` PATCH is idempotent; `quota_config` MERGE only touches changed rows. |
+| `views` / `deploy-views` | half | 30-60 s | Every `CREATE OR REPLACE VIEW` runs, but re-creating an unchanged view is a no-op. |
+
+**Common resume scenarios:**
+
+```bash
+# Views failed (schema-drift / waiting-for-logs); everything else is fine:
+make deploy-views PROJECT=<p>
+
+# Only tf-apply changed something; image + bootstrap + views already good:
+make tf-apply PROJECT=<p>
+
+# Full re-run but skip the slow image build:
+SKIP_IMAGE=true make deploy-infra PROJECT=<p>
+
+# Just re-seed engine metadata (e.g. after adding a new engine in GE console):
+make bootstrap PROJECT=<p>
+```
+
 ### Step-by-step (debugging)
 
 ```bash

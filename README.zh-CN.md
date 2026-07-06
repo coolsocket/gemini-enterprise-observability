@@ -212,6 +212,34 @@ gcloud run services proxy ge-observability --port 8080 --region us-central1
 open http://localhost:8080
 ```
 
+### 失败后恢复 (幂等性一览)
+
+所有部署步骤都幂等 —— 不会删数据。有的智能跳过,有的每次都重跑。参考此表决定重试哪一步,不用整链重跑:
+
+| 步骤 | 智能跳过? | 重跑代价 | 说明 |
+|---|---|---|---|
+| `preflight`             | n/a  | ~5 秒  | 只读扫描,不改任何东西 |
+| `tf-apply`              | ✅ **完全智能** | ~10-30 秒 | Terraform diff state,已存在且一致的资源 no-op |
+| `image`                 | ❌ **总是重 build** | 1-3 分钟 | `gcloud builds submit --tag=:latest` 不 hash 源码,每次全量 build。**知道镜像没变时用 `SKIP_IMAGE=true`** (比如只改了 Terraform) |
+| `bootstrap`             | 大部分 | ~5 秒 | metadata 表 TRUNCATE-load (量小);`observabilityConfig` PATCH 幂等;`quota_config` MERGE 只动变了的行 |
+| `views` / `deploy-views` | 半智能 | 30-60 秒 | 每个 `CREATE OR REPLACE VIEW` 都执行,但重建相同定义的 view 等于 no-op |
+
+**常见恢复场景:**
+
+```bash
+# views 挂了 (schema drift / 等日志),其他都好:
+make deploy-views PROJECT=<p>
+
+# 只有 tf-apply 有改动,image / bootstrap / views 都还好:
+make tf-apply PROJECT=<p>
+
+# 想整链重跑,但跳过慢的 image build:
+SKIP_IMAGE=true make deploy-infra PROJECT=<p>
+
+# GE console 里加了新 engine,只想重新拉 metadata:
+make bootstrap PROJECT=<p>
+```
+
 ### 分步走 (debug)
 
 ```bash

@@ -102,9 +102,17 @@ tf-import-orphans: check-project tf-init
 	PROJECT=$(PROJECT) DATASET=$(DATASET) REGION=$(REGION) AR_REPO=$(AR_REPO) \
 	  bash infra/scripts/import_orphans.sh
 
-# Step 3: build container image and push to Artifact Registry
+# Step 3: build container image and push to Artifact Registry.
+# `SKIP_IMAGE=true` skips the Cloud Build submit — useful when you know the
+# image is already up to date (e.g. re-running `deploy-infra` after just a
+# terraform tweak). Cloud Build takes 1-3 min and re-building an unchanged
+# image is the slowest wasted step in the chain.
 image: check-project
-	gcloud builds submit --project=$(PROJECT) --tag=$(IMAGE) .
+	@if [ "$(SKIP_IMAGE)" = "true" ]; then \
+	  echo "→ SKIP_IMAGE=true — not rebuilding image ($(IMAGE))"; \
+	else \
+	  gcloud builds submit --project=$(PROJECT) --tag=$(IMAGE) . ; \
+	fi
 
 # Step 4: apply BQ views (renders {{PROJECT}}/{{DATASET}}/{{SIM_PATTERN}}/
 # {{SIM_PREFIX}} placeholders). Idempotent — safe to re-run; missing log-sink
