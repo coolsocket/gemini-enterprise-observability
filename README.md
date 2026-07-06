@@ -17,6 +17,32 @@ Answers questions like:
 
 ---
 
+## Table of contents
+
+- [Pages](#pages) — what each dashboard tab shows
+- [Architecture](#architecture) — data flow, why BQ + FastAPI + React
+- [Deploying to your GCP project](#deploying-to-your-gcp-project)
+  - [Prerequisites](#prerequisites) — tools, GCP state, auth
+  - [Full end-to-end verification checklist](#full-end-to-end-verification-checklist) — ~14 items to reach green
+  - [Two-phase deploy (recommended for fresh projects)](#two-phase-deploy-recommended-for-fresh-projects)
+  - [Preview the dashboard](#preview-the-dashboard) — local vs Cloud Run
+  - [Step-by-step (debugging)](#step-by-step-debugging)
+  - [Troubleshooting](#troubleshooting) — 6 common failure modes
+- [Local development](#local-development) — `make api-run` + Vite HMR
+- [Repo layout](#repo-layout) — where everything lives
+- [Known Limitations](#known-limitations) — 20 items, grouped
+  - [Data — signals GE doesn't emit](#data--signals-ge-doesnt-emit)
+  - [API — what a service account can't do](#api--what-a-service-account-cant-do)
+  - [Deploy — manual steps outside our automation](#deploy--manual-steps-outside-our-automation)
+  - [Operational — freshness + performance](#operational--freshness--performance)
+- [Authentication](#authentication) — runtime SA + IAM
+- [Operational tasks](#operational-tasks) — refresh, rotate, backfill
+- [Changelog](#changelog) — user-visible changes, newest first
+- [Key contributors](#key-contributors)
+- [License](#license) — Apache 2.0
+
+---
+
 ## Pages
 
 | Page | What it shows |
@@ -161,6 +187,15 @@ cd gemini-enterprise-observability
 # ---------- Phase A: provision + image + metadata ----------
 make deploy-infra PROJECT=my-project REGION=us-central1
 # Runs: terraform apply → gcloud builds submit → bootstrap.py
+#
+# What `REGION` controls (default us-central1):
+#   • Artifact Registry repo location (where the container image lives)
+#   • Cloud Run service location (where the dashboard runs, if you flip
+#     deploy_cloud_run=true)
+# It does NOT control the BigQuery dataset location — that's `bq_location`
+# in terraform/variables.tf (defaults to `US` multi-region). Log Router sinks
+# are global. Pick a region close to your users; changing it later requires
+# tf-destroy + re-apply because Cloud Run and AR are regional resources.
 
 # ---------- Manual step ----------
 # In GE Admin Console, per engine, enable:

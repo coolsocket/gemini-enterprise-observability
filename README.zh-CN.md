@@ -17,6 +17,32 @@ Cloud Logging → BigQuery → React + FastAPI 全套打通。
 
 ---
 
+## 目录
+
+- [页面](#页面) —— 每个 tab 展示什么
+- [架构](#架构) —— 数据流、为啥用 BQ + FastAPI + React
+- [部署到自己的 GCP 项目](#部署到自己的-gcp-项目)
+  - [前置条件](#前置条件) —— 本地工具 / GCP 状态 / 鉴权
+  - [完整端到端验证清单](#完整端到端验证清单) —— ~14 项打勾直到 green
+  - [两阶段部署 (新项目推荐)](#两阶段部署-新项目推荐)
+  - [预览 dashboard](#预览-dashboard) —— 本地 vs Cloud Run
+  - [分步走 (debug)](#分步走-debug)
+  - [常见坑排查](#常见坑排查) —— 6 种常见失败
+- [本地开发](#本地开发) —— `make api-run` + Vite HMR
+- [仓库结构](#仓库结构)
+- [已知限制](#已知限制) —— 20 项,四类分组
+  - [数据 — GE 不 emit 的信号](#数据--ge-不-emit-的信号)
+  - [API — service account 做不了的事](#api--service-account-做不了的事)
+  - [部署 — 自动化外的手工步骤](#部署--自动化外的手工步骤)
+  - [运维 — 新鲜度 + 性能](#运维--新鲜度--性能)
+- [鉴权](#鉴权) —— runtime SA + IAM
+- [运维任务](#运维任务) —— 刷新 / 轮换 / 补数
+- [变更日志](#变更日志) —— 用户可见变化,最新在上
+- [核心贡献者](#核心贡献者)
+- [License](#license) —— Apache 2.0
+
+---
+
 ## 页面
 
 | 页面 | 内容 |
@@ -138,6 +164,14 @@ cd gemini-enterprise-observability
 # ---------- 阶段 A: 基础设施 + 镜像 + metadata ----------
 make deploy-infra PROJECT=my-project REGION=us-central1
 # 跑: terraform apply → gcloud builds submit → bootstrap.py
+#
+# `REGION` 控制什么 (默认 us-central1):
+#   • Artifact Registry 仓库位置 (镜像存哪)
+#   • Cloud Run 服务位置 (如果 deploy_cloud_run=true, dashboard 跑在哪)
+# 它**不控制** BigQuery dataset 位置 —— 那是 terraform/variables.tf 里的
+# `bq_location` (默认 `US` multi-region)。Log Router sink 是 global。
+# 选离用户近的 region;之后要改需要 tf-destroy + 重 apply,因为 Cloud Run
+# 和 Artifact Registry 都是区域性资源。
 
 # ---------- 手工步骤 ----------
 # GE Admin 控制台每个 engine 打开:
