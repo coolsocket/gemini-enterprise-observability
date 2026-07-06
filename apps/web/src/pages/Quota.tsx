@@ -67,14 +67,15 @@ function EditableNumber({ value, onSave, saving, accent }: {
 }
 
 const FEATURE_META: Record<string, { label: string; icon: string; color: string; hint: string }> = {
-  chat:          { label: "Chat", icon: "💬", color: "text-ggreen", hint: "Google 助理查询 · StreamAssist" },
-  deep_research: { label: "Deep Research", icon: "🔬", color: "text-info",   hint: "AsyncAssist 提交次数" },
-  agent_create:  { label: "Agent 创建", icon: "🔧", color: "text-gyellow", hint: "无代码 agent builder" },
-  video_gen:     { label: "视频生成",   icon: "🎬", color: "text-gred",  hint: "启发式 - GE 后端不 emit audit log, 用 StreamAssist prompt 关键词匹配" },
-  image_gen:     { label: "图片生成",   icon: "🖼️",  color: "text-gred",  hint: "启发式 - 同上, 关键词如'生成一只青蛙'" },
-  idea_gen:      { label: "Idea Generation", icon: "💡", color: "text-gblue", hint: "启发式 · GE 走 StreamAssist 混不出来" },
+  chat:          { label: "Chat",         icon: "💬", color: "text-ggreen",  hint: "StreamAssist 调用次数" },
+  deep_research: { label: "Deep Research",icon: "🔬", color: "text-info",    hint: "AsyncAssist 提交次数（不含轮询）" },
+  agent_create:  { label: "Agent 创建",   icon: "🔧", color: "text-gyellow", hint: "AgentService.CreateAgent 事件" },
 };
-const FEATURE_ORDER = ["chat", "deep_research", "agent_create", "video_gen", "image_gen", "idea_gen"];
+// image_gen / video_gen / idea_gen removed 2026-07-06 — GE runs those inside
+// Google infra without customer audit logs, so we can only guess from prompt
+// keywords, which was inaccurate enough to mislead. Bring back only when GE
+// exposes a real per-feature counter.
+const FEATURE_ORDER = ["chat", "deep_research", "agent_create"];
 
 const TIER_TAG: Record<string, string> = {
   standard: "bg-ink-muted/15 text-ink-secondary border-ink-muted/30",
