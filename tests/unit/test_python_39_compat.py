@@ -39,7 +39,13 @@ from pathlib import Path
 
 import pytest
 
-MAIN_PY = Path(__file__).resolve().parents[2] / "apps/api/main.py"
+# Was `apps/api/main.py` before the routes/ split (Phase 2, 2026-07-06).
+# Now glob every module under apps/api/ so newly-added route files stay
+# covered by the same PEP 604 gate.
+API_ROOT = Path(__file__).resolve().parents[2] / "apps/api"
+API_PY_FILES = sorted(API_ROOT.rglob("*.py"))
+# Kept for backwards compat (unused directly but kept in case downstream tools grep for it)
+MAIN_PY = API_ROOT / "main.py"
 
 
 def _union_pipe_annotations(source: str) -> list[tuple[int, str]]:
@@ -91,16 +97,19 @@ def test_pyproject_declares_python_version() -> None:
 
 
 def test_no_pep604_unions_in_fastapi_endpoints() -> None:
-    """Fail if apps/api/main.py has any `X | Y` union syntax in a function
+    """Fail if any apps/api/**/*.py has `X | Y` union syntax in a function
     signature — FastAPI can't evaluate those on Python 3.9.
 
     Fix: rewrite to `Optional[X]` (imported from typing).
     """
-    source = MAIN_PY.read_text()
-    hits = _union_pipe_annotations(source)
-    assert not hits, (
-        f"Found {len(hits)} function-signature `X | Y` union(s) in apps/api/main.py:\n"
-        + "\n".join(f"  line {ln}: {snip}" for ln, snip in hits)
+    all_hits: list[tuple[Path, int, str]] = []
+    for py in API_PY_FILES:
+        source = py.read_text()
+        for ln, snip in _union_pipe_annotations(source):
+            all_hits.append((py, ln, snip))
+    assert not all_hits, (
+        f"Found {len(all_hits)} function-signature `X | Y` union(s) under apps/api/:\n"
+        + "\n".join(f"  {p.relative_to(API_ROOT.parent.parent)}:{ln}: {snip}" for p, ln, snip in all_hits)
         + "\nFastAPI's route registration calls evaluate_forwardref() at import "
         "time, which real-eval's these annotations even under "
         "`from __future__ import annotations`. On Python 3.9 that raises "

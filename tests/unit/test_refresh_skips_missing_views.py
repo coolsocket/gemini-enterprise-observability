@@ -36,14 +36,14 @@ truly unexpected errors (permission, SQL syntax, etc.).
 from pathlib import Path
 import re
 
-MAIN_PY = Path(__file__).resolve().parents[2] / "apps/api/main.py"
+MAIN_PY = Path(__file__).resolve().parents[2] / "apps/api/routes/refresh.py"
 
 
 def _extract_function(source: str, name: str) -> str:
     """Extract a top-level function definition body (until the next top-level
-    def/decorator)."""
+    def/async def/decorator/EOF)."""
     m = re.search(
-        rf"^def {name}\([^)]*\)[^:]*:.*?(?=\n(?:def |@app\.))",
+        rf"^def {name}\([^)]*\)[^:]*:.*?(?=\n(?:def |async def |@app\.|@router\.)|\Z)",
         source,
         re.DOTALL | re.MULTILINE,
     )

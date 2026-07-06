@@ -39,7 +39,7 @@ this repo's current test surface.
 from pathlib import Path
 import re
 
-MAIN_PY = Path(__file__).resolve().parents[2] / "apps/api/main.py"
+MAIN_PY = Path(__file__).resolve().parents[2] / "apps/api/routes/observability.py"
 
 
 def test_rows_falls_back_from_snapshot_to_view_on_not_found() -> None:
