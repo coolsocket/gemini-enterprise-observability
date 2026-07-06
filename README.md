@@ -411,6 +411,14 @@ Keep this list current when changing user-visible behavior, quota semantics, or 
 
 ---
 
+## Key contributors
+
+- [**@panliuyang-debug**](https://github.com/panliuyang-debug) — deep audit-log detective work on a fresh-project deploy (issue [#1](https://github.com/coolsocket/gemini-enterprise-observability/issues/1)). Two of their discoveries genuinely changed the product: **(a)** `Engine.observabilityConfig` is a real API field — GE Console clicking is no longer required (`bootstrap.py` now auto-flips it per engine); **(b)** `jsonPayload.serviceTextReply` carries the full UI-chat response inline in `user_activity` — dashboard pairing rate went from ~10% to ~60%. Also reported the reserved-`PORT`, `deletion_protection` deadlock, deploy ordering, SQL splitter, and the plain-chat-triggers-AsyncAssist mislabeling — all fixed in [`a5a3d3f`](https://github.com/coolsocket/gemini-enterprise-observability/commit/a5a3d3f).
+
+Contributions welcome — issues, PRs, and audit-log war stories all appreciated.
+
+---
+
 ## License
 
-Apache 2.0 — see [`LICENSE`](./LICENSE). Built by Claude Code (Opus). Contributions welcome.
+Apache 2.0 — see [`LICENSE`](./LICENSE). Built by Claude Code (Opus).
