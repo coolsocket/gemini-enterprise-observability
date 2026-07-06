@@ -863,17 +863,75 @@ WHERE tl.tier = COALESCE(t.tier, (SELECT t FROM default_tier))
 ORDER BY utilization DESC, ut.actor_email, tl.feature;
 
 -- ---------------------------------------------------------------
--- v_quota_totals — today's platform-wide usage vs sum(per-user tier limit)
--- Useful for "we bought N seats × 10 DR/day = 10N DR quota; today's actual = M"
+-- v_quota_totals — today's platform-wide usage vs total PURCHASED-SEAT
+-- capacity, not "sum over active users". GE charges quota per purchased
+-- seat, so an org that bought 20 seats with 10 active users still has
+-- 20 × per-tier-limit of platform capacity to spend.
+--
+-- Seat → tier attribution:
+--   - explicit rows in user_tier honor their assigned tier
+--   - remaining seats (purchased_seats − assigned) get default_tier
+--   - if purchased_seats is unknown, falls back to active-user count
 -- ---------------------------------------------------------------
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_quota_totals` AS
+WITH cfg AS (
+  SELECT key, value FROM `{{PROJECT}}.{{DATASET}}.quota_config`
+),
+purchased AS (
+  SELECT CAST(value AS INT64) AS n
+  FROM cfg WHERE key = 'license.total_seats'
+),
+default_tier AS (
+  SELECT value AS t FROM cfg WHERE key = 'quota.default_tier'
+),
+tier_limits AS (
+  SELECT SPLIT(key, '.')[SAFE_OFFSET(1)] AS tier,
+         REGEXP_EXTRACT(key, r'\.([^.]+)_daily$') AS feature,
+         CAST(value AS INT64) AS daily_limit
+  FROM cfg WHERE key LIKE 'tier.%_daily'
+),
+assigned AS (
+  SELECT tier, COUNT(*) AS n
+  FROM `{{PROJECT}}.{{DATASET}}.user_tier`
+  GROUP BY tier
+),
+active_users AS (
+  SELECT COUNT(DISTINCT actor_email) AS n
+  FROM `{{PROJECT}}.{{DATASET}}.v_quota_utilization`
+),
+seat_pool AS (
+  -- (a) explicitly assigned users at their tier
+  SELECT tier, n FROM assigned
+  UNION ALL
+  -- (b) leftover purchased seats at default_tier (min 0)
+  SELECT (SELECT t FROM default_tier) AS tier,
+         GREATEST(
+           0,
+           COALESCE((SELECT n FROM purchased), (SELECT n FROM active_users))
+             - COALESCE((SELECT SUM(n) FROM assigned), 0)
+         ) AS n
+),
+per_feature_capacity AS (
+  SELECT tl.feature, SUM(sp.n * tl.daily_limit) AS total_daily_quota
+  FROM tier_limits tl
+  JOIN seat_pool sp USING (tier)
+  GROUP BY tl.feature
+),
+per_feature_usage AS (
+  SELECT feature,
+         SUM(used_today) AS total_used_today,
+         COUNTIF(over_quota) AS users_over_quota,
+         COUNT(DISTINCT actor_email) AS active_users
+  FROM `{{PROJECT}}.{{DATASET}}.v_quota_utilization`
+  GROUP BY feature
+)
 SELECT
-  feature,
-  COUNT(DISTINCT actor_email) AS eligible_users,
-  SUM(daily_limit) AS total_daily_quota,
-  SUM(used_today) AS total_used_today,
-  SAFE_DIVIDE(SUM(used_today), SUM(daily_limit)) AS overall_utilization,
-  COUNTIF(over_quota) AS users_over_quota
-FROM `{{PROJECT}}.{{DATASET}}.v_quota_utilization`
-GROUP BY feature
+  c.feature,
+  COALESCE((SELECT n FROM purchased), (SELECT n FROM active_users)) AS eligible_users,
+  c.total_daily_quota,
+  IFNULL(u.total_used_today, 0) AS total_used_today,
+  SAFE_DIVIDE(IFNULL(u.total_used_today, 0), c.total_daily_quota) AS overall_utilization,
+  IFNULL(u.users_over_quota, 0) AS users_over_quota
+FROM per_feature_capacity c
+LEFT JOIN per_feature_usage u USING (feature)
 ORDER BY overall_utilization DESC;

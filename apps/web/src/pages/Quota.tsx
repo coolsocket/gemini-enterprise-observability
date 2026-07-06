@@ -107,7 +107,7 @@ function TotalCard({ feature, total, used, users, over_quota_users, overall_util
         <div className={`h-full ${barColor} transition-all`} style={{ width: `${Math.min(100, util * 100)}%` }} />
       </div>
       <div className="flex justify-between text-[10px] text-ink-muted mt-1.5">
-        <span>{users} eligible</span>
+        <span>{users} seats</span>
         {over_quota_users > 0 && <span className="text-gred">{over_quota_users} 超额</span>}
       </div>
     </div>
