@@ -16,9 +16,23 @@
 
 **GCP 项目状态**
 - 项目已建、billing 已开 (`gcloud beta billing projects link ...`)
-- 你有 **Owner** 或 (Editor + Security Admin + Project IAM Admin) —— Terraform 要启用 API、授 role
 - **Gemini Enterprise engine 已在目标项目里**(本仓库只观察,不建 GE)
 - **Cloud Build API 预先启用** 好让 `make image` 第一次就通:`gcloud services enable cloudbuild.googleapis.com --project=<project>` (Terraform 会启,但顺序不对时先被这个卡)
+
+**deploying principal 需要的 IAM role — 2026-07-06 一个个撞出来验证过:**
+
+| Terraform 资源 | 最小权限 (具体) | 覆盖的 composite role |
+|---|---|---|
+| Enable required APIs | `serviceusage.services.enable` | `roles/serviceusage.serviceUsageAdmin` |
+| 建 BQ dataset + tables | `bigquery.datasets.create` / `tables.create` | `roles/bigquery.dataOwner` |
+| 建 Log Router sink | `logging.sinks.create` + `logging.buckets.get` | `roles/logging.configWriter` |
+| 建 Artifact Registry repo | `artifactregistry.repositories.create` | `roles/artifactregistry.admin` |
+| 建 runtime service account | `iam.serviceAccounts.create` | `roles/iam.serviceAccountAdmin` |
+| 给 SA 授 project-level role (bigquery.jobUser, discoveryengine.viewer) | `resourcemanager.projects.setIamPolicy` | `roles/resourcemanager.projectIamAdmin` |
+| 设 discoveryengine 的 audit-config (authoritative) | `resourcemanager.projects.setIamPolicy` (同上) | `roles/resourcemanager.projectIamAdmin` |
+| 建 Cloud Run service (`deploy_cloud_run = true` 时) | `run.services.create` | `roles/run.admin` |
+
+**最简单答案:项目 `roles/owner`。** 组织不让给 Owner 就把上面 7 个 composite 都授给部署方。缺任何一个 `terraform apply` 会在中途 403,需要 [`make tf-import-orphans`](../TROUBLESHOOTING.zh-CN.md) 恢复。
 
 **认证 (两个都要)**
 - `gcloud auth login` —— Terraform + Cloud Build CLI 用
