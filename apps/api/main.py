@@ -184,7 +184,21 @@ def _rows(view: str, limit: int = 1000, origin: Optional[str] = None,
     src = view if live else snapshot_name(view)
     sql = f"SELECT * FROM `{PROJECT}.{DATASET}.{src}`{where} LIMIT {limit}"
     log.info("query: %s", sql)
-    return [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+    from google.api_core.exceptions import NotFound
+    try:
+        return [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+    except NotFound:
+        # Snapshot table doesn't exist yet — happens on fresh deploys before
+        # the 6-hour Scheduled Query has ticked (or before someone POSTs
+        # /api/refresh). Fall back to the live view so dashboard pages return
+        # data instead of 500. Slightly slower but correct.
+        if live:
+            raise  # live view itself was missing — that's a real problem
+        src = view
+        fallback_sql = f"SELECT * FROM `{PROJECT}.{DATASET}.{src}`{where} LIMIT {limit}"
+        log.warning("snapshot %s not found — falling back to live view %s",
+                    snapshot_name(view), view)
+        return [_json_safe(dict(r)) for r in _bq.query(fallback_sql).result()]
 
 
 @app.get("/api/engines")
@@ -788,7 +802,16 @@ def summary(origin: Optional[str] = None, engine_id: Optional[str] = None, live:
       ua.ts  AS last_user_activity_event
     FROM a, d, e, adm, dac, ua, conv
     """
-    row = next(iter(_bq.query(sql).result()), None)
+    from google.api_core.exceptions import NotFound
+    try:
+        row = next(iter(_bq.query(sql).result()), None)
+    except NotFound:
+        # A snapshot table used in this CTE doesn't exist yet (fresh deploy).
+        # Re-run with live=True — same query but hitting v_* views directly.
+        if live:
+            raise
+        log.warning("summary: snapshot missing, retrying against live views")
+        return summary(origin=origin, engine_id=engine_id, live=True, since_hours=since_hours)
     return _json_safe(dict(row)) if row else {}
 
 
