@@ -264,6 +264,13 @@ resource "google_cloud_run_v2_service" "dashboard" {
   project  = var.project_id
   location = var.region
 
+  # Set false so a bad first-deploy (e.g. image not yet pushed) can be
+  # replaced without manually running `gcloud run services delete` +
+  # `terraform state rm`. Google provider v6 defaults this to true, which
+  # combined with a failed initial create-in-place deadlocks subsequent
+  # applies (reported in issue #1).
+  deletion_protection = false
+
   template {
     service_account = google_service_account.dashboard_sa.email
 
@@ -277,10 +284,10 @@ resource "google_cloud_run_v2_service" "dashboard" {
         name  = "BQ_DATASET"
         value = var.dataset_id
       }
-      env {
-        name  = "PORT"
-        value = "8080"
-      }
+      # NOTE: `PORT` is a Cloud Run reserved env var — the runtime injects it
+      # automatically (defaults to 8080). Setting it here fails create with
+      # `The following reserved env names were provided: PORT`. The app reads
+      # PORT from the environment as usual; nothing to do here.
       resources {
         limits = {
           memory = "512Mi"
@@ -297,7 +304,20 @@ resource "google_cloud_run_v2_service" "dashboard" {
   depends_on = [
     google_bigquery_dataset_iam_member.dashboard_reader,
     google_project_iam_member.dashboard_bq_jobuser,
+    # Repo must exist before Cloud Run can pull. `make image` is a separate
+    # step (Cloud Build) and must happen BEFORE `deploy_cloud_run=true`;
+    # otherwise Cloud Run errors with "image not found" during Create.
+    # Default `deploy_cloud_run=false` protects first-time deployers; if you
+    # flip it true, run `make image` first.
+    google_artifact_registry_repository.dashboard,
   ]
+
+  lifecycle {
+    # Cloud Run's create-with-missing-image failure leaves a broken service
+    # that can't be updated in-place. Explicit replace-on-image-change so a
+    # subsequent `make image` + apply triggers a full recreate cleanly.
+    create_before_destroy = false
+  }
 }
 
 # IAP / public access policy

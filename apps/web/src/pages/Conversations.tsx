@@ -69,7 +69,9 @@ export default function Conversations() {
         engine: turns[0].engine_display_name ?? turns[0].engine_id_raw,
         first: turns[0].timestamp,
         last: turns[turns.length - 1].timestamp,
-        matched_count: turns.filter((t) => t.join_status === "matched").length,
+        // join_status = matched_gen_ai_choice (trace-JOIN) | matched_service_reply
+        //   (inline serviceTextReply) | no_response. Treat both matched_* as "has response".
+        matched_count: turns.filter((t) => t.join_status?.startsWith("matched")).length,
         no_response_count: turns.filter((t) => t.join_status === "no_response").length,
       }))
       .sort((a, b) => b.last.localeCompare(a.last));

@@ -186,6 +186,11 @@ WITH base AS (
     REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
     REGEXP_EXTRACT(jsonPayload.logmetadata.name, r'/engines/([^/]+)') AS engine_id_raw,
     (SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt_raw,
+    -- serviceTextReply is populated when the engine has
+    -- observabilityConfig.sensitiveLoggingEnabled = true. This is the model's
+    -- text response inline in user_activity — no trace-JOIN needed. See
+    -- v_conversations_with_response for how we COALESCE it with gen_ai.choice.
+    jsonPayload.servicetextreply AS service_text_reply_raw,
     REGEXP_EXTRACT(jsonPayload.response.answer.name, r'sessions/([^/]+)') AS session_id,
     jsonPayload.response.answer.state AS state,
     jsonPayload.response.assisttoken AS assist_token
@@ -194,7 +199,7 @@ WITH base AS (
     AND ARRAY_LENGTH(jsonPayload.request.query.parts) > 0
 ),
 redacted AS (
-  SELECT * EXCEPT(prompt_raw),
+  SELECT * EXCEPT(prompt_raw, service_text_reply_raw),
     REGEXP_REPLACE(
       REGEXP_REPLACE(
         REGEXP_REPLACE(
@@ -203,7 +208,16 @@ redacted AS (
           r'(?:\+?86[- ]?)?(?:1[3-9]\d{9})', '[PHONE]'),
         r'\b\d{15,18}[Xx]?\b', '[ID-NUMBER]'),
       r'\b\d{16,19}\b', '[CARD-NUMBER]'
-    ) AS prompt
+    ) AS prompt,
+    REGEXP_REPLACE(
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(service_text_reply_raw,
+            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL]'),
+          r'(?:\+?86[- ]?)?(?:1[3-9]\d{9})', '[PHONE]'),
+        r'\b\d{15,18}[Xx]?\b', '[ID-NUMBER]'),
+      r'\b\d{16,19}\b', '[CARD-NUMBER]'
+    ) AS service_text_reply
   FROM base
 )
 SELECT
@@ -259,20 +273,32 @@ GROUP BY trace_id, agent_id;
 -- v_conversations_with_response — exact trace JOIN
 -- ---------------------------------------------------------------
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_conversations_with_response` AS
+-- Response text can come from two places:
+--   1. gen_ai.choice audit stream (v1alpha REST calls) — joined by trace_id,
+--      gives full response + reasoning + finish_reason
+--   2. jsonPayload.serviceTextReply on the user_activity row itself (v1main UI
+--      calls, when engine has sensitiveLoggingEnabled=true) — gives just the
+--      final response text
+-- Historically we only had (1), so UI chats appeared as no_response. Adding
+-- (2) via COALESCE covers the UI path too. See known-limitation #1.
 SELECT
   p.timestamp, p.actor_email, p.origin,
   p.engine_id_raw, p.engine_display_name,
   p.prompt, p.session_id,
   p.trace_id AS prompt_trace_id,
   ca.trace_id AS response_trace_id,
-  ca.response_full AS response_text,
+  COALESCE(ca.response_full, p.service_text_reply) AS response_text,
   ca.reasoning_full AS reasoning_text,
   CASE ca.finish_score
     WHEN 4 THEN 'STOP' WHEN 3 THEN 'MAX_TOKENS' WHEN 2 THEN 'SAFETY'
     WHEN 1 THEN 'OTHER' WHEN 0 THEN 'UNSPECIFIED' ELSE NULL
   END AS response_status,
   ca.chunk_count,
-  IF(ca.trace_id IS NOT NULL, 'matched', 'no_response') AS join_status
+  CASE
+    WHEN ca.trace_id IS NOT NULL            THEN 'matched_gen_ai_choice'
+    WHEN p.service_text_reply IS NOT NULL   THEN 'matched_service_reply'
+    ELSE                                         'no_response'
+  END AS join_status
 FROM `{{PROJECT}}.{{DATASET}}.v_conversations` p
 LEFT JOIN `{{PROJECT}}.{{DATASET}}.v_choices_agg` ca
   ON ca.trace_id = p.trace_id;
@@ -586,9 +612,19 @@ ORDER BY total DESC;
 
 -- ---------------------------------------------------------------
 -- v_deep_research_prompts — reverse-attribute prompts to Deep Research
+--
 -- Heuristic: for each AsyncAssist/ReadAsyncAssist audit event, find the
 -- nearest StreamAssist prompt from the SAME actor within ±60s.
--- The UI groups by prompt to show "these DR events all came from this query".
+--
+-- ⚠ Caveat: as of 2026-07 GE fires AsyncAssist alongside plain chats too
+-- (verified: a "check the weather" prompt triggered both StreamAssist AND
+-- AsyncAssist + 2× ReadAsyncAssist at the same second). Audit resourceName
+-- is `.../assistants/default_assistant` in both cases — no discriminator.
+-- To reduce mislabeling, we suppress attribution when the candidate prompt
+-- already has a matched normal-chat response (join_status starts with
+-- 'matched_') — that strongly indicates the prompt was NOT a DR request.
+-- Real DR prompts stay unmatched by v_conversations_with_response because
+-- the DR response text is not emitted to gen_ai.choice or serviceTextReply.
 -- ---------------------------------------------------------------
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_deep_research_prompts` AS
 WITH dr_events AS (
@@ -600,15 +636,22 @@ WITH dr_events AS (
   WHERE protopayload_auditlog.methodName LIKE '%AssistantService.AsyncAssist'
      OR protopayload_auditlog.methodName LIKE '%AssistantService.ReadAsyncAssist'
 ),
+-- Only consider prompts that do NOT already have a matched normal-chat response.
+-- If a prompt paired with a normal reply, it wasn't a DR trigger — even if
+-- an AsyncAssist landed within ±60s (GE fires them alongside chats).
 stream_prompts AS (
   SELECT
-    timestamp AS prompt_ts,
-    REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
-    REGEXP_EXTRACT(jsonPayload.request.name, r'/engines/([^/]+)/') AS engine_id_raw,
-    (SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt
-  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
-  WHERE jsonPayload.logmetadata.methodname = 'StreamAssist'
-    AND ARRAY_LENGTH(jsonPayload.request.query.parts) > 0
+    p.timestamp AS prompt_ts,
+    REGEXP_REPLACE(p.jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
+    REGEXP_EXTRACT(p.jsonPayload.request.name, r'/engines/([^/]+)/') AS engine_id_raw,
+    (SELECT text FROM UNNEST(p.jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt
+  FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity` p
+  LEFT JOIN `{{PROJECT}}.{{DATASET}}.v_conversations_with_response` cwr
+    ON cwr.prompt_trace_id = p.trace
+  WHERE p.jsonPayload.logmetadata.methodname = 'StreamAssist'
+    AND ARRAY_LENGTH(p.jsonPayload.request.query.parts) > 0
+    -- Suppress attribution for prompts that got a normal chat response
+    AND (cwr.join_status IS NULL OR cwr.join_status = 'no_response')
 ),
 -- For each DR event, pick the closest prompt (may be NULL if none within ±60s)
 attributed AS (

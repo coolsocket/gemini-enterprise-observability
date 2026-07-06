@@ -68,7 +68,7 @@ function EditableNumber({ value, onSave, saving, accent }: {
 
 const FEATURE_META: Record<string, { label: string; icon: string; color: string; hint: string }> = {
   chat:          { label: "Chat",         icon: "💬", color: "text-ggreen",  hint: "StreamAssist 调用次数" },
-  deep_research: { label: "Deep Research",icon: "🔬", color: "text-info",    hint: "AsyncAssist 提交次数（不含轮询）" },
+  deep_research: { label: "Deep Research",icon: "🔬", color: "text-info",    hint: "AsyncAssist 提交次数（不含轮询）。⚠ GE 会在普通聊天时也触发 AsyncAssist,此计数可能虚高" },
   agent_create:  { label: "Agent 创建",   icon: "🔧", color: "text-gyellow", hint: "AgentService.CreateAgent 事件" },
 };
 // image_gen / video_gen / idea_gen removed 2026-07-06 — GE runs those inside

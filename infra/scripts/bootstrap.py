@@ -130,6 +130,47 @@ def load_table(table_id: str, rows: list[dict]) -> None:
     print(f"  loaded {len(rows)} rows into {table_id}")
 
 
+def enable_engine_observability(engines: list[dict]) -> None:
+    """PATCH each engine to turn on observabilityConfig.
+
+    Discovered 2026-07-06 (thanks issue #1 from panliuyang-debug): Engine
+    carries an `observabilityConfig` field in v1/v1beta/v1alpha with:
+      - observabilityEnabled     ↔ OpenTelemetry Instrumentation toggle
+      - sensitiveLoggingEnabled  ↔ Prompt & Response Logging toggle
+    Previously documented as "no API — must click in GE Admin Console".
+    This function flips both to `true` for every engine, removing the
+    manual step. Only 'Enable Feedback' still has no API and stays manual.
+
+    Set env var SKIP_OBSERVABILITY=true to skip (e.g. if the operator wants
+    to leave the toggles alone for some engines).
+    """
+    if os.environ.get("SKIP_OBSERVABILITY", "").lower() == "true":
+        print("  SKIP_OBSERVABILITY=true — leaving observabilityConfig alone")
+        return
+    ok = 0
+    failed: list[tuple[str, str]] = []
+    for e in engines:
+        engine_full = e["name"]  # projects/…/engines/<id>
+        url = (f"https://discoveryengine.googleapis.com/v1alpha/{engine_full}"
+               f"?updateMask=observabilityConfig")
+        body = {"observabilityConfig": {
+            "observabilityEnabled": True,
+            "sensitiveLoggingEnabled": True,
+        }}
+        try:
+            _http(url, method="PATCH", body=body)
+            ok += 1
+        except Exception as ex:
+            failed.append((engine_full.split("/")[-1], str(ex)[:200]))
+    total = len(engines)
+    print(f"  observabilityConfig: enabled on {ok}/{total} engine(s)")
+    for eid, err in failed:
+        print(f"     ✗ {eid}: {err}")
+    if ok:
+        print("     (observabilityEnabled=OpenTelemetry, sensitiveLoggingEnabled=Prompt&Response Logging)")
+        print("     ⚠ 'Enable Feedback' still has no API — flip manually in GE Admin Console if needed.")
+
+
 def seed_quota_config() -> None:
     from google.cloud import bigquery
     client = bigquery.Client(project=PROJECT)
@@ -247,6 +288,11 @@ def main():
 
     # 5. snapshot_meta — leave empty; populated on first refresh
     print("→ snapshot_meta (left empty; populated on first refresh)")
+
+    # 6. Turn on per-engine observabilityConfig (replaces the old manual step).
+    #    See docs/GE_CONSOLE_SETUP.md for what this maps to in the UI.
+    print("→ engine observabilityConfig")
+    enable_engine_observability(engines)
 
     print()
     print("Bootstrap complete.")

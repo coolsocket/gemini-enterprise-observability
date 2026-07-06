@@ -1,27 +1,53 @@
-# GE Admin Console — Required toggles for observability
+# GE Admin Console — Observability toggles
 
-These are **manual** steps a GE admin must do for the dashboard to capture all data.
-**The Terraform module CANNOT do this — there is no API.**
+Two of the three toggles now have a public API and are flipped automatically
+by `bootstrap.py`. Only "Enable Feedback" still requires a manual click.
 
-## When to do this
+## What flips automatically (as of 2026-07-06)
 
-After Terraform `apply` succeeds and the BQ dataset + sink are in place.
+`bootstrap.py` runs `PATCH .../engines/{id}?updateMask=observabilityConfig`
+against every engine in the project:
 
-## Steps
+```json
+{
+  "observabilityConfig": {
+    "observabilityEnabled": true,
+    "sensitiveLoggingEnabled": true
+  }
+}
+```
+
+- `observabilityEnabled` ↔ **Enable OpenTelemetry Instrumentation** (generates
+  trace IDs pairing prompt → response, and turns on `serviceTextReply` inline
+  responses in `user_activity`)
+- `sensitiveLoggingEnabled` ↔ **Enable Prompt and Response Logging** (writes
+  raw prompt + response text to `gen_ai.user.message` and `gen_ai.choice`,
+  plus populates `jsonPayload.serviceTextReply` in user_activity)
+
+To skip this automation (e.g. if you want to leave some engines untouched):
+
+```bash
+SKIP_OBSERVABILITY=true make bootstrap PROJECT=…
+```
+
+Then flip the toggles manually per the "manual steps" section below.
+
+## What still needs a manual click
+
+| Toggle | What it does | Impact if off |
+|---|---|---|
+| **Enable Feedback** | Records user thumbs-up/down on responses | Feedback events column will be empty |
+
+`Feedback` has no known API field yet — you have to click in the console.
+
+## Manual steps (skip if automation succeeded)
 
 1. Open Google Cloud Console → Search "Discovery Engine" or go to
    <https://console.cloud.google.com/gen-app-builder/engines>
 2. Select your project + the engine (app) you want to observe
 3. Click into the engine → **Configurations** tab (or "Settings" depending on UI version)
 4. Find the **Observability** section
-5. Toggle ON:
-
-| Toggle | What it does | Impact if off |
-|---|---|---|
-| **Enable Feedback** | Records user thumbs-up/down on responses | Feedback events column will be empty |
-| **Enable OpenTelemetry Instrumentation** | Generates trace IDs that link prompt → response | Conversations page can't pair them (all "no_response") |
-| **Enable Prompt and Response Logging** | Writes `gen_ai.user.message` + `gen_ai.choice` logs | No prompt/response content in dashboard at all |
-
+5. Toggle ON the ones you need (see table above)
 6. Click **Save**. Allow ~5 min for changes to take effect.
 
 ## Verify
