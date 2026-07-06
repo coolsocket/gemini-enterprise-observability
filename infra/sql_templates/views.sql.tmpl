@@ -44,6 +44,7 @@ SELECT
   CASE
     WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN b.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     WHEN b.actor_email IS NULL OR b.actor_email = '' THEN 'UNKNOWN'
     ELSE 'HUMAN'
@@ -62,6 +63,7 @@ SELECT
   CASE
     WHEN actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN actor_email LIKE '%@%' AND actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -103,6 +105,7 @@ SELECT
   CASE
     WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN b.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     WHEN b.actor_email IS NULL OR b.actor_email = '' THEN 'UNKNOWN'
     ELSE 'HUMAN'
@@ -121,6 +124,7 @@ SELECT
   CASE
     WHEN actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN actor_email LIKE '%@%' AND actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -247,6 +251,7 @@ SELECT
   CASE
     WHEN r.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN r.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN r.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN r.actor_email LIKE '%@%' AND r.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -265,9 +270,21 @@ SELECT
   resource.labels.engine_id AS engine_id_raw,
   resource.labels.agent_id AS agent_id,
   jsonPayload.finish_reason AS finish_reason,
-  (SELECT text FROM UNNEST(jsonPayload.content.parts) WHERE text IS NOT NULL AND (thought IS NULL OR thought = false) LIMIT 1) AS response_text,
-  (SELECT text FROM UNNEST(jsonPayload.content.parts) WHERE text IS NOT NULL AND thought = true LIMIT 1) AS reasoning_text,
-  ARRAY_LENGTH(jsonPayload.content.parts) AS part_count
+  -- Schema-drift guard: `content.parts` may be STRUCT (with .text and .thought)
+  -- or a JSON-encoded STRING when the sink table's schema was inferred from a
+  -- minimal log entry. JSON_QUERY_ARRAY works either way and preserves the
+  -- `thought=true/false` filtering.
+  (SELECT JSON_VALUE(p, '$.text')
+   FROM UNNEST(JSON_QUERY_ARRAY(TO_JSON_STRING(jsonPayload), '$.content.parts')) p
+   WHERE JSON_VALUE(p, '$.text') IS NOT NULL
+     AND (JSON_VALUE(p, '$.thought') IS NULL OR JSON_VALUE(p, '$.thought') = 'false')
+   LIMIT 1) AS response_text,
+  (SELECT JSON_VALUE(p, '$.text')
+   FROM UNNEST(JSON_QUERY_ARRAY(TO_JSON_STRING(jsonPayload), '$.content.parts')) p
+   WHERE JSON_VALUE(p, '$.text') IS NOT NULL
+     AND JSON_VALUE(p, '$.thought') = 'true'
+   LIMIT 1) AS reasoning_text,
+  ARRAY_LENGTH(JSON_QUERY_ARRAY(TO_JSON_STRING(jsonPayload), '$.content.parts')) AS part_count
 FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gen_ai_choice`;
 
 -- ---------------------------------------------------------------
@@ -344,6 +361,7 @@ SELECT
   CASE
     WHEN ua.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN ua.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN ua.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN ua.actor_email LIKE '%@%' AND ua.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -392,6 +410,7 @@ SELECT
   CASE
     WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN a.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -503,6 +522,7 @@ SELECT
   CASE
     WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN b.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -529,6 +549,7 @@ SELECT
   CASE
     WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') LIKE '%@%' AND REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -718,6 +739,7 @@ SELECT
   CASE
     WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN a.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -765,7 +787,14 @@ stream_prompts AS (
     ) AS prompt
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
   WHERE jsonPayload.logmetadata.methodname = 'StreamAssist'
-    AND ARRAY_LENGTH(jsonPayload.request.query.parts) > 0
+    -- Schema-drift guard: query may be STRUCT or STRING. `prompt` above already
+    -- COALESCEs both shapes; here we just require it resolved to non-NULL.
+    AND COALESCE(
+      JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.request.query.parts[0].text'),
+      JSON_VALUE(SAFE.PARSE_JSON(JSON_VALUE(TO_JSON_STRING(jsonPayload),
+                                            '$.request.query')),
+                 '$.parts[0].text')
+    ) IS NOT NULL
 ),
 -- For each prompt, find the NEAREST preceding agent-open within 5 min
 attributed AS (
@@ -791,6 +820,7 @@ SELECT
   CASE
     WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
+    WHEN a.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
     WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,

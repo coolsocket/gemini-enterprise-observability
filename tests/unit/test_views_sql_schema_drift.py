@@ -152,3 +152,78 @@ def test_json_wrapper_pattern_present_for_agentinfo(views_sql: str) -> None:
         "template — otherwise custom-agent nav events disappear on projects "
         "where agentspaceinfo has no agentinfo sub-struct."
     )
+
+
+# -------------------------------------------------------------------
+# Bug 3: unguarded ARRAY_LENGTH(query.parts) — same STRING/STRUCT drift
+# -------------------------------------------------------------------
+def test_no_unguarded_array_length_query_parts(views_sql: str) -> None:
+    """Every WHERE / SELECT that measures `ARRAY_LENGTH(...query.parts)` fails
+    the same way `.parts[0].text` did if the column drifted to STRING. Same
+    fix required — either drop the guard or replace with a JSON-aware check.
+
+    RED before preemptive fix (still present in v_agent_usage); GREEN after.
+    """
+    hits = _lines_matching(
+        views_sql,
+        r"ARRAY_LENGTH\s*\(\s*[^)]*jsonPayload\.request\.query\.parts",
+    )
+    assert not hits, (
+        f"Found {len(hits)} unguarded ARRAY_LENGTH(...query.parts) call(s):\n"
+        + "\n".join(f"  line {ln}: {txt}" for ln, txt in hits)
+        + "\nSame schema-drift risk as the .parts[].text case. Replace with a "
+        "COALESCE(JSON_VALUE(...), JSON_VALUE(SAFE.PARSE_JSON(...), ...)) IS NOT NULL "
+        "guard so it works whether query is STRUCT or JSON-encoded STRING."
+    )
+
+
+# -------------------------------------------------------------------
+# Bug 4: gen_ai.choice `content.parts` drift (mirror of query.parts)
+# -------------------------------------------------------------------
+def test_no_unguarded_content_parts_access(views_sql: str) -> None:
+    """v_choices unpacks `jsonPayload.content.parts` from the gen_ai.choice log
+    stream. If a project's gen_ai.choice table was schema-inferred from a
+    minimal entry (content as STRING), the whole v_choices view fails at
+    plan time. Wrap via JSON_VALUE.
+
+    RED before preemptive fix (v_choices lines ~268-270); GREEN after.
+    """
+    hits = _lines_matching(
+        views_sql,
+        r"UNNEST\s*\(\s*jsonPayload\.content\.parts\s*\)"
+        r"|ARRAY_LENGTH\s*\(\s*jsonPayload\.content\.parts",
+    )
+    assert not hits, (
+        f"Found {len(hits)} unguarded jsonPayload.content.parts access(es):\n"
+        + "\n".join(f"  line {ln}: {txt}" for ln, txt in hits)
+        + "\nWrap via JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.content.parts[0].text') "
+        "so v_choices survives on projects whose gen_ai.choice table has a "
+        "minimal inferred schema."
+    )
+
+
+# -------------------------------------------------------------------
+# Bug 5: OIDC / workforce identity principals mis-classified as UNKNOWN
+# -------------------------------------------------------------------
+def test_origin_classifier_handles_workforce_principals(views_sql: str) -> None:
+    """OIDC / Workforce Identity Federation users appear in principalEmail
+    as `principal://iam.googleapis.com/locations/global/workforcePools/POOL/subject/ID`
+    — they don't contain `@` at all, so the existing CASE WHEN
+      `LIKE '%@%' AND NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'`
+    ELSE branch classifies every OIDC user as 'UNKNOWN'.
+
+    RED before fix (no principal:// pattern in any CASE WHEN);
+    GREEN after: at least one branch matches `principal:%` as HUMAN.
+    """
+    has_workforce_branch = re.search(
+        r"LIKE\s+'principal://%'\s+THEN\s+'HUMAN'"
+        r"|LIKE\s+'principal:%'\s+THEN\s+'HUMAN'"
+        r"|STARTS_WITH\s*\([^)]+,\s*'principal:'\s*\)",
+        views_sql,
+    )
+    assert has_workforce_branch, (
+        "No workforce-identity classification branch found. Add a "
+        "`WHEN actor_email LIKE 'principal://%' THEN 'HUMAN'` clause to every "
+        "origin CASE WHEN, otherwise every OIDC user on the dashboard shows "
+        "as origin='UNKNOWN' with an unfriendly long principal:// URL as email."
+    )
