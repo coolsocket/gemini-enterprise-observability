@@ -101,6 +101,57 @@ Before you start, make sure you have all of these:
 - `gcloud auth login` — for the Terraform + Cloud Build CLIs
 - `gcloud auth application-default login` — for the Python helpers (`apply_views.py`, `bootstrap.py`, and the FastAPI backend) which all use ADC
 
+### Full end-to-end verification checklist
+
+Deployment isn't "done" the moment `terraform apply` finishes — several
+steps depend on GE Console toggles being flipped **manually** and on the
+Logs Router sink actually receiving matching entries. Use this list to
+know when you've truly reached green:
+
+- [ ] `make deploy-infra PROJECT=<p> REGION=<r>` exits 0
+  - Provisions 24 resources (BQ dataset, sink, 6 metadata tables, IAM,
+    audit-config, Artifact Registry repo, service account)
+  - Builds + pushes the container image to Artifact Registry
+  - `bootstrap.py` loads `engine_metadata` / `datastore_metadata` /
+    `resources_alive` and seeds `quota_config` with live seat count
+- [ ] Terraform output `dataset_full_name` prints your project + dataset
+- [ ] `bq ls <project>:<dataset>` shows the 6 metadata tables
+- [ ] `bq ls -a <project>:<dataset>` **also** shows the metadata tables —
+  helpful when confirming region + case
+- [ ] Open **GE Admin Console** for each engine and flip the toggles:
+  - [ ] OpenTelemetry Instrumentation (generates `trace_id` for pairing)
+  - [ ] Prompt & Response Logging (writes `gen_ai.user.message` +
+        `gen_ai.choice`)
+  - [ ] Feedback (optional; enables thumbs-up/down capture)
+  - Full walk-through with screenshots: `docs/GE_CONSOLE_SETUP.md`
+- [ ] Generate real GE traffic — at minimum: one chat turn per engine,
+  one Deep Research submission, and one NotebookLM notebook interaction
+- [ ] Wait ~2-5 minutes for Logs Router to deliver the first entries. Confirm:
+  ```bash
+  bq ls -a <project>:<dataset> | grep -E 'cloudaudit_|discoveryengine_'
+  ```
+  You should see `cloudaudit_googleapis_com_activity`,
+  `cloudaudit_googleapis_com_data_access`, and (if traffic was chat/DR)
+  `discoveryengine_googleapis_com_gemini_enterprise_user_activity` +
+  `..._gen_ai_choice`. If any are missing, keep generating traffic — BQ
+  auto-creates them on the first matching row.
+- [ ] `make deploy-views PROJECT=<p>` — expected to be **fully green**
+  now: `applied 21/21 views`, zero waiting / cascade / real errors. If
+  some views are still waiting, the corresponding audit-log table hasn't
+  received its first row yet; send more traffic of that type + re-run.
+- [ ] `make serve PROJECT=<p>` and open `http://127.0.0.1:8000` — hit
+  every page: Overview, Users, User Deep Dive, Agents, Engines,
+  Conversations, Data Access, Quota, Settings. None should show
+  "loading forever" or 500s.
+- [ ] The Quota page's "Seats" panel shows a non-zero
+  `license.total_seats` (fetched live from `licenseConfigs`)
+- [ ] Optionally set `deploy_cloud_run = true` in
+  `terraform.tfvars` + add `iap_invokers = […]` + `make tf-apply` again,
+  then `gcloud run services proxy ge-observability --port 8080 --region <r>`
+
+If any checkbox above stays red for more than a few minutes, the
+Troubleshooting section below covers the most common causes.
+
 ### Two-phase deploy (recommended for fresh projects)
 
 ```bash
@@ -313,6 +364,8 @@ Cloud Run runs with `--no-allow-unauthenticated`. Only `roles/run.invoker` holde
 
 Keep this list current when changing user-visible behavior, quota semantics, or dashboard data model. Newest first. See `git log` for full detail.
 
+- **2026-07-06** — Two Deep Research consistency fixes: (a) `v_data_access_summary.deep_research_calls` used to count both `AsyncAssist` (submit) AND `ReadAsyncAssist` (UI polling) — inflating per-user counts 3-5×. Now aligned with `v_daily_usage_per_user` to count submits only; a user who ran two research tasks over two days now shows `4` on both the Quota page and User Deep Dive, not `4` and `12`. (b) Verified via full method-name audit: Deep Research (`AssistantService.AsyncAssist`), Google Search API (`SearchService.Search`), and grounded chat search (`ConversationalSearchService.GetAnswer`) are three distinct services that our counters keep in separate buckets — Deep Research is never conflated with Search.
+- **2026-07-06** — README Prerequisites now includes a full end-to-end verification checklist (~14 items) so first-time deployers know exactly when to declare victory, including the manual GE Console toggle step and the "wait for logs then re-run views" loop. Both EN + zh-CN.
 - **2026-07-06** — Deploy pipeline fixes for first-time deployers (simulated from scratch, hit 3 blockers): (a) `apply_views.py` now categorizes missing-source-table errors as "waiting for log-sink tables" (idempotent, safe to re-run once logs flow) vs "missing Terraform-managed table" (actionable: run `tf-apply`) vs "real errors". (b) `bootstrap.py` migrated from `subprocess("gcloud auth print-access-token")` to `google.auth.default()` — no gcloud CLI needed in containers/CI. (c) Container image moved from deprecated `gcr.io/` to Artifact Registry (`<region>-docker.pkg.dev/...`); Terraform now provisions a `google_artifact_registry_repository`. (d) `make deploy` split into two-phase `deploy-infra` + `deploy-views` reflecting the fact that BQ sink target tables only exist after GE toggles ON + traffic flows. (e) `deploy_cloud_run` default flipped to `false` so first-time deployers can iterate locally. (f) README got a full Prerequisites section + Troubleshooting covering the 5 common failure modes.
 - **2026-07-06** — Removed `image_gen`, `video_gen`, `idea_gen` from the Quota dashboard. GE runs those generations inside Google infrastructure and does not emit customer audit logs, so we had been relying on a prompt-keyword heuristic that misclassified "summarize this video" style prompts. Underlying tier_limit rows in `quota_config` preserved for revival if GE ever exposes real per-feature counters.
 - **2026-07-06** — Quota total now computed from **purchased seats** (`licenseConfigs`), not active-user count. Previously an org that bought 20 seats but had 10 active users showed only 10× per-tier limit; now it correctly shows 20× (assigned tiers honored, remaining seats fall back to `quota.default_tier`). Per-feature card label changed from "eligible" to "seats".

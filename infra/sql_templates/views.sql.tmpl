@@ -128,8 +128,12 @@ SELECT
   engine_display_name,
   COUNTIF(full_method LIKE '%AssistantService.StreamAssist'
        OR full_method LIKE '%AssistantService.Assist') AS chat_turns,
+  -- Deep Research = AsyncAssist SUBMITS only. ReadAsyncAssist is UI polling
+  -- for the async result and inflates the count 3-5x per actual research task.
+  -- Kept aligned with v_daily_usage_per_user's deep_research bucket so Quota
+  -- and User Deep Dive report the same number for the same concept.
   COUNTIF(full_method LIKE '%AssistantService.AsyncAssist'
-       OR full_method LIKE '%AssistantService.ReadAsyncAssist') AS deep_research_calls,
+      AND full_method NOT LIKE '%ReadAsyncAssist') AS deep_research_calls,
   -- NotebookLM (real method namespace is v1main, NOT v1alpha. Catches both for safety.)
   -- NotebookService: CreateNotebook, GetNotebook, GenerateNotebookGuide, DiscoverSources, etc.
   -- AccountService: GetOrCreateAccount (per-user NotebookLM identity setup)
