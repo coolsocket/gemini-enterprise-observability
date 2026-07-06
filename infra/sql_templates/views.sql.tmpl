@@ -179,24 +179,46 @@ ORDER BY total_data_access DESC;
 -- v_conversations — prompt with PII redaction
 -- ---------------------------------------------------------------
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_conversations` AS
+-- Schema-drift guard: `jsonPayload.request.query` may land as a STRUCT
+-- (with .parts[].text) OR as a plain STRING (JSON-encoded, when the sink
+-- target table's schema was inferred from an early minimal log entry).
+-- Wrapping via TO_JSON_STRING + JSON_VALUE navigates both cases without
+-- a plan-time error. See tests/unit/test_views_sql_schema_drift.py.
 WITH base AS (
   SELECT
     timestamp,
     trace AS trace_id,
     REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
     REGEXP_EXTRACT(jsonPayload.logmetadata.name, r'/engines/([^/]+)') AS engine_id_raw,
-    (SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt_raw,
+    -- Try both shapes: struct-nav via JSON path, and JSON-encoded-string
+    -- fallback when `query` came in as a plain string.
+    COALESCE(
+      JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.request.query.parts[0].text'),
+      JSON_VALUE(SAFE.PARSE_JSON(JSON_VALUE(TO_JSON_STRING(jsonPayload),
+                                            '$.request.query')),
+                 '$.parts[0].text')
+    ) AS prompt_raw,
     -- serviceTextReply is populated when the engine has
     -- observabilityConfig.sensitiveLoggingEnabled = true. This is the model's
     -- text response inline in user_activity — no trace-JOIN needed. See
     -- v_conversations_with_response for how we COALESCE it with gen_ai.choice.
-    jsonPayload.servicetextreply AS service_text_reply_raw,
-    REGEXP_EXTRACT(jsonPayload.response.answer.name, r'sessions/([^/]+)') AS session_id,
-    jsonPayload.response.answer.state AS state,
-    jsonPayload.response.assisttoken AS assist_token
+    JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.servicetextreply') AS service_text_reply_raw,
+    REGEXP_EXTRACT(
+      JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.response.answer.name'),
+      r'sessions/([^/]+)'
+    ) AS session_id,
+    JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.response.answer.state') AS state,
+    JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.response.assisttoken') AS assist_token
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
   WHERE jsonPayload.logmetadata.methodname IN ('StreamAssist', 'Assist')
-    AND ARRAY_LENGTH(jsonPayload.request.query.parts) > 0
+    -- Row-level guard replaces the schema-dependent ARRAY_LENGTH(...parts) > 0
+    -- Any non-empty prompt (from either shape) qualifies.
+    AND COALESCE(
+      JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.request.query.parts[0].text'),
+      JSON_VALUE(SAFE.PARSE_JSON(JSON_VALUE(TO_JSON_STRING(jsonPayload),
+                                            '$.request.query')),
+                 '$.parts[0].text')
+    ) IS NOT NULL
 ),
 redacted AS (
   SELECT * EXCEPT(prompt_raw, service_text_reply_raw),
@@ -459,13 +481,18 @@ GROUP BY d ORDER BY d DESC;
 -- Page types observed: home, agent_gallery, agent, deep-research, notebook-lm
 -- ---------------------------------------------------------------
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_agentspace_navigation` AS
+-- Schema-drift guard: `agentspaceinfo.agentinfo` may be absent from the sink
+-- target table's schema (BQ inferred it from a log entry that only had
+-- `agentspacepagetype`). Wrap agentinfo references via JSON_VALUE so a missing
+-- sub-struct yields NULL instead of a plan error. `agentspacepagetype` itself
+-- is always present so direct access is safe.
 WITH base AS (
   SELECT
     timestamp,
     REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
     jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype AS page_type,
-    jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid AS agent_id,
-    jsonPayload.request.userevent.agentspaceinfo.agentinfo.name AS agent_name,
+    JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.request.userevent.agentspaceinfo.agentinfo.agentid') AS agent_id,
+    JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.request.userevent.agentspaceinfo.agentinfo.name') AS agent_name,
     REGEXP_EXTRACT(jsonPayload.request.userevent.engine, r'/engines/([^/]+)$') AS engine_id_raw
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
   WHERE jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype IS NOT NULL
@@ -511,10 +538,14 @@ SELECT
   COUNTIF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'notebook-lm') AS notebooklm_visits,
   COUNTIF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent') AS custom_agent_visits,
   COUNT(DISTINCT IF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent',
-                    jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid, NULL)) AS distinct_custom_agents,
+                    JSON_VALUE(TO_JSON_STRING(jsonPayload),
+                               '$.request.userevent.agentspaceinfo.agentinfo.agentid'),
+                    NULL)) AS distinct_custom_agents,
   STRING_AGG(DISTINCT
     IF(jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent',
-       jsonPayload.request.userevent.agentspaceinfo.agentinfo.name, NULL),
+       JSON_VALUE(TO_JSON_STRING(jsonPayload),
+                  '$.request.userevent.agentspaceinfo.agentinfo.name'),
+       NULL),
     ', ') AS custom_agent_names,
   COUNT(*) AS total_navigation_events,
   MAX(timestamp) AS last_visit
@@ -644,12 +675,23 @@ stream_prompts AS (
     p.timestamp AS prompt_ts,
     REGEXP_REPLACE(p.jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
     REGEXP_EXTRACT(p.jsonPayload.request.name, r'/engines/([^/]+)/') AS engine_id_raw,
-    (SELECT text FROM UNNEST(p.jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt
+    -- Schema-drift guard: query may be STRUCT or STRING; JSON path works both.
+    COALESCE(
+      JSON_VALUE(TO_JSON_STRING(p.jsonPayload), '$.request.query.parts[0].text'),
+      JSON_VALUE(SAFE.PARSE_JSON(JSON_VALUE(TO_JSON_STRING(p.jsonPayload),
+                                            '$.request.query')),
+                 '$.parts[0].text')
+    ) AS prompt
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity` p
   LEFT JOIN `{{PROJECT}}.{{DATASET}}.v_conversations_with_response` cwr
     ON cwr.prompt_trace_id = p.trace
   WHERE p.jsonPayload.logmetadata.methodname = 'StreamAssist'
-    AND ARRAY_LENGTH(p.jsonPayload.request.query.parts) > 0
+    AND COALESCE(
+      JSON_VALUE(TO_JSON_STRING(p.jsonPayload), '$.request.query.parts[0].text'),
+      JSON_VALUE(SAFE.PARSE_JSON(JSON_VALUE(TO_JSON_STRING(p.jsonPayload),
+                                            '$.request.query')),
+                 '$.parts[0].text')
+    ) IS NOT NULL
     -- Suppress attribution for prompts that got a normal chat response
     AND (cwr.join_status IS NULL OR cwr.join_status = 'no_response')
 ),
@@ -696,22 +738,31 @@ ORDER BY a.dr_ts DESC;
 -- StreamAssist chats to that agent.
 -- ---------------------------------------------------------------
 CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_custom_agent_prompts` AS
+-- Schema-drift guard: agentinfo may be absent from the sink table's inferred
+-- schema; query.parts may be a STRING. JSON_VALUE(TO_JSON_STRING(...)) works
+-- either way. See tests/unit/test_views_sql_schema_drift.py.
 WITH agent_opens AS (
   SELECT
     timestamp AS open_ts,
     REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
-    jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid AS agent_id,
-    jsonPayload.request.userevent.agentspaceinfo.agentinfo.name AS agent_name
+    JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.request.userevent.agentspaceinfo.agentinfo.agentid') AS agent_id,
+    JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.request.userevent.agentspaceinfo.agentinfo.name') AS agent_name
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
   WHERE jsonPayload.request.userevent.agentspaceinfo.agentspacepagetype = 'agent'
-    AND jsonPayload.request.userevent.agentspaceinfo.agentinfo.agentid IS NOT NULL
+    AND JSON_VALUE(TO_JSON_STRING(jsonPayload),
+                   '$.request.userevent.agentspaceinfo.agentinfo.agentid') IS NOT NULL
 ),
 stream_prompts AS (
   SELECT
     timestamp AS prompt_ts,
     REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
     REGEXP_EXTRACT(jsonPayload.request.name, r'/engines/([^/]+)/') AS engine_id_raw,
-    (SELECT text FROM UNNEST(jsonPayload.request.query.parts) WHERE text IS NOT NULL LIMIT 1) AS prompt
+    COALESCE(
+      JSON_VALUE(TO_JSON_STRING(jsonPayload), '$.request.query.parts[0].text'),
+      JSON_VALUE(SAFE.PARSE_JSON(JSON_VALUE(TO_JSON_STRING(jsonPayload),
+                                            '$.request.query')),
+                 '$.parts[0].text')
+    ) AS prompt
   FROM `{{PROJECT}}.{{DATASET}}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
   WHERE jsonPayload.logmetadata.methodname = 'StreamAssist'
     AND ARRAY_LENGTH(jsonPayload.request.query.parts) > 0

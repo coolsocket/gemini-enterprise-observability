@@ -33,6 +33,7 @@ set -uo pipefail
 : "${PROJECT:?ERROR: PROJECT=<gcp-project-id> required}"
 DATASET="${DATASET:-ge_observability}"
 REGION="${REGION:-us-central1}"
+BQ_LOCATION="${BQ_LOCATION:-US}"
 AR_REPO="${AR_REPO:-ge-observability}"
 SA_ID="${SA_ID:-ge-observability-sa}"
 SINK_NAME="${SINK_NAME:-ge-observability-sink}"
@@ -50,8 +51,27 @@ existing_resources=()
 audit_would_change="no"
 current_audit=""
 
-echo "${B}==> Pre-flight for ${PROJECT} (${REGION})${N}"
+echo "${B}==> Pre-flight for ${PROJECT}${N}"
+echo "    REGION=${REGION}  (Cloud Run + Artifact Registry)"
+echo "    BQ_LOCATION=${BQ_LOCATION}  (BigQuery dataset)"
 echo ""
+
+# Warn if REGION and BQ_LOCATION won't co-locate — often a mistake, since
+# data-residency or latency intent usually applies to both.
+case "${REGION}:${BQ_LOCATION}" in
+  us-*:US|us-*:us*) : ;;                     # us region + US multi-region: fine
+  eu-*:EU|eu-*:eu*|europe-*:EU|europe-*:eu*) : ;;  # eu + EU
+  asia-*:asia|asia-*:asia-*) : ;;                  # asia + asia multi-region
+  "${REGION}:${REGION}") : ;;                # exact match: fine
+  *)
+    echo "${Y}⚠ REGION (${REGION}) and BQ_LOCATION (${BQ_LOCATION}) don't co-locate.${N}"
+    echo "    If you want everything in the same physical region, pass e.g.:"
+    echo "      make deploy-infra PROJECT=${PROJECT} REGION=${REGION} BQ_LOCATION=${REGION}"
+    echo "    If you WANT data in a different region than compute (data-residency"
+    echo "    intent), ignore this warning."
+    echo ""
+    ;;
+esac
 
 # --- 1. BQ dataset ---
 if bq --project_id="$PROJECT" ls -d 2>/dev/null | awk '{print $1}' | grep -Fxq "$DATASET"; then
