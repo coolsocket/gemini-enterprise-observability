@@ -24,13 +24,18 @@ web-install:
 web-build:
 	cd apps/web && npm run build
 
-api-run:
+# main.py reads BQ_PROJECT/BQ_DATASET/SIM_PREFIX at import time — need to
+# thread them into uvicorn's env, not just Make's. `make serve PROJECT=foo`
+# without the env-var prefix silently drops PROJECT and fails at import.
+api-run: check-project
 	. $(VENV)/bin/activate && cd apps/api && \
-	uvicorn main:app --host 127.0.0.1 --port $(PORT) --reload
+	BQ_PROJECT=$(PROJECT) BQ_DATASET=$(DATASET) SIM_PREFIX=$(SIM_PREFIX) \
+	  uvicorn main:app --host 127.0.0.1 --port $(PORT) --reload
 
-serve: web-build
+serve: check-project web-build
 	. $(VENV)/bin/activate && cd apps/api && \
-	uvicorn main:app --host 127.0.0.1 --port $(PORT)
+	BQ_PROJECT=$(PROJECT) BQ_DATASET=$(DATASET) SIM_PREFIX=$(SIM_PREFIX) \
+	  uvicorn main:app --host 127.0.0.1 --port $(PORT)
 
 dev:
 	@echo "Run in two terminals:"
@@ -53,6 +58,10 @@ clean:
 PROJECT ?=
 REGION ?= us-central1
 DATASET ?= ge_observability
+
+# Prefix stripped from actor emails at query time (see infra/scripts/apply_views.py).
+# Default 'sim-' matches nothing normally; override if your seed SAs use another prefix.
+SIM_PREFIX ?= sim-
 
 # BigQuery dataset location — separate from REGION (which is for Cloud Run +
 # Artifact Registry). Default is the US multi-region for maximum availability.
