@@ -14,7 +14,7 @@
 
 """RED test for INV-001: BQ_LOCATION follows REGION by default.
 
-See infra/INVARIANTS.md#INV-001.
+See infra/contexts/deploy/INVARIANTS.md#INV-001.
 
 Reported: `make install` copied .env.example to .env, which shipped a
 hardcoded `BQ_LOCATION=US`. Operator ran

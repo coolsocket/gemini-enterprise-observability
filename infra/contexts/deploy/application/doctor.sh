@@ -18,7 +18,7 @@
 # Always exits 0 — informational only. Read by `make doctor`.
 
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../.."
 
 if [ -t 1 ]; then
   G=$(tput setaf 2); Y=$(tput setaf 3); R=$(tput setaf 1); B=$(tput bold); D=$(tput dim); N=$(tput sgr0)

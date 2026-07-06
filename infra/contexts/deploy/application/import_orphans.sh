@@ -24,12 +24,12 @@
 #
 # Usage:
 #   PROJECT=<gcp-project> DATASET=ge_observability REGION=us-central1 AR_REPO=ge-observability \
-#     bash infra/scripts/import_orphans.sh
+#     bash infra/contexts/deploy/application/import_orphans.sh
 #
 # After it finishes, re-run `make tf-apply` (or `make deploy-infra`).
 
 set -uo pipefail
-cd "$(dirname "$0")/../../terraform"
+cd "$(dirname "$0")/../../../../terraform"
 
 : "${PROJECT:?ERROR: PROJECT=<gcp-project-id> required}"
 DATASET="${DATASET:-ge_observability}"

@@ -20,7 +20,7 @@
 - **[常见坑排查](./docs/TROUBLESHOOTING.zh-CN.md)** —— 症状 → 原因 → 修法
 - **[已知限制](./docs/KNOWN_LIMITATIONS.zh-CN.md)** —— 20 项,按数据 / API / 部署 / 运维 4 类分组
 - **[变更日志](./CHANGELOG.zh-CN.md)** —— 用户可见变化,最新在上
-- **[不变量](./infra/INVARIANTS.md)** —— 部署时的不变量 (每个修复所依赖的前置条件)
+- **[不变量](./infra/contexts/deploy/INVARIANTS.md)** —— 部署时的不变量 (每个修复所依赖的前置条件)
 - **[GE 控制台配置](./docs/GE_CONSOLE_SETUP.md)** —— 唯一剩下的手工 GE toggle (`Enable Feedback`)
 - **[运维手册](./docs/RUNBOOK.md)** —— 刷新、轮换、backfill 剧本
 
@@ -127,23 +127,42 @@ open http://localhost:8011
 
 ## 仓库结构
 
+按 bounded-context 分层 (2026-07-06 TDDD 重构后):
+
 ```
 ge-observability-service/
-├── apps/
-│   ├── api/main.py                # FastAPI 后端 (~830 行)
-│   └── web/src/                    # React 18 + Vite + Tailwind
+├── apps/api/                             # FastAPI 后端,DDD-ish 分层
+│   ├── main.py                           # ~50 行:装 router + 启动
+│   ├── shared/
+│   │   ├── common.py                     # 跨切:_json_safe, valid origins
+│   │   └── infrastructure/bq_client.py   # THE bigquery.Client 单例 + 配置
+│   ├── routes/                           # 按 context 分的 HTTP 薄层
+│   │   ├── meta.py    observability.py   quota.py   refresh.py   spa.py
+│   └── contexts/                         # 每 context 的 domain (纯逻辑无 I/O)
+│       ├── observability/
+│       │   ├── INVARIANTS.md             # INV-obs-001 (snapshot fallback), INV-obs-002 (refresh precheck)
+│       │   └── domain/
+│       │       ├── view_registry.py      # VIEWS + VIEWS_WITH_* + snapshot_name
+│       │       └── query_builder.py      # QuerySpec, build_query_spec, render_sql
+│       └── quota/
+│           ├── INVARIANTS.md             # INV-quota-001 (seats = licenseConfigs.total)
+│           └── domain/
+│               ├── license_parse.py      # 纯函数: parse_license_configs(api_json)
+│               └── tier_allocation.py    # 纯函数: allocate_seats(purchased, assigned, default)
+├── apps/web/src/                         # React 18 + Vite + Tailwind
 ├── infra/
-│   ├── sql_templates/views.sql.tmpl   # 21 个 BQ view
-│   ├── scripts/                    # doctor / preflight / bootstrap / apply_views
-│   └── INVARIANTS.md               # 部署时不变量
-├── terraform/                      # dataset + sink + IAM + AR + Cloud Run
-├── docs/                           # DEPLOYMENT / TROUBLESHOOTING / KNOWN_LIMITATIONS 等
-├── tests/unit/                     # 25 个回归断言
-├── playground/                     # audit-log 逆向笔记
+│   ├── sql_templates/views.sql.tmpl      # 21 个 BQ view
+│   └── contexts/deploy/
+│       ├── INVARIANTS.md                 # INV-001 (BQ_LOCATION 跟随 REGION)
+│       └── application/                  # doctor / preflight / bootstrap / apply_views / import_orphans
+├── terraform/                            # dataset + sink + IAM + AR + Cloud Run
+├── docs/                                 # DEPLOYMENT / TROUBLESHOOTING / KNOWN_LIMITATIONS / GE_CONSOLE_SETUP / RUNBOOK
+├── tests/unit/                           # 25 个回归断言
+├── playground/                           # audit-log 逆向笔记
 ├── CHANGELOG.md
-├── Makefile                        # install / doctor / serve / deploy-* / resume
-├── pyproject.toml                  # Python ≥ 3.9
-└── LICENSE                         # Apache 2.0
+├── Makefile                              # install / doctor / serve / deploy-* / resume
+├── pyproject.toml                        # Python ≥ 3.9
+└── LICENSE                               # Apache 2.0
 ```
 
 ---

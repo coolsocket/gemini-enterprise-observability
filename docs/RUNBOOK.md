@@ -35,7 +35,7 @@ PROJECT=<your-project> bq query --use_legacy_sql=false \
 ```bash
 # Edit infra/sql_templates/views.sql.tmpl
 PROJECT=<your-project> DATASET=ge_observability \
-  python3 infra/scripts/apply_views.py
+  python3 infra/contexts/deploy/application/apply_views.py
 ```
 
 ## Simulate users (e.g. for demos)
@@ -66,7 +66,7 @@ done
 
 - Likely a view definition refers to a missing column.
   - Check uvicorn log for `Unrecognized name: X`
-  - Re-apply views: `python3 infra/scripts/apply_views.py`
+  - Re-apply views: `python3 infra/contexts/deploy/application/apply_views.py`
 
 ### Snapshot refresh failed
 

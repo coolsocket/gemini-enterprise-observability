@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = ROOT / "Makefile"
 ENV_EXAMPLE = ROOT / ".env.example"
 GITIGNORE = ROOT / ".gitignore"
-DOCTOR = ROOT / "infra/scripts/doctor.sh"
+DOCTOR = ROOT / "infra/contexts/deploy/application/doctor.sh"
 
 
 @pytest.fixture(scope="module")
@@ -87,7 +87,7 @@ def test_doctor_target_exists(makefile: str) -> None:
         for ln in makefile.splitlines()
     )
     assert has_target, "Makefile missing `doctor` target — env health check is critical UX."
-    assert DOCTOR.exists(), "infra/scripts/doctor.sh missing — Makefile target has nothing to run."
+    assert DOCTOR.exists(), "infra/contexts/deploy/application/doctor.sh missing — Makefile target has nothing to run."
     # Should be executable
     assert DOCTOR.stat().st_mode & 0o111, "doctor.sh not executable — chmod +x it."
 

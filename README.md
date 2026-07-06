@@ -21,7 +21,7 @@ Answers questions like:
 - **[Troubleshooting](./docs/TROUBLESHOOTING.md)** — symptom → cause → fix for the common failure modes
 - **[Known Limitations](./docs/KNOWN_LIMITATIONS.md)** — 20 items grouped by Data / API / Deploy / Operational
 - **[Changelog](./CHANGELOG.md)** — user-visible changes, newest first
-- **[Invariants](./infra/INVARIANTS.md)** — deploy-time invariants each fix relies on
+- **[Invariants](./infra/contexts/deploy/INVARIANTS.md)** — deploy-time invariants each fix relies on
 - **[GE Console setup](./docs/GE_CONSOLE_SETUP.md)** — the one manual GE toggle (`Enable Feedback`) that still can't be auto-flipped
 - **[Ops runbook](./docs/RUNBOOK.md)** — refresh, rotate, backfill playbooks
 
@@ -130,28 +130,42 @@ Tests:
 
 ## Repo layout
 
+Bounded-context layout (after 2026-07-06 TDDD refactor):
+
 ```
 ge-observability-service/
-├── apps/
-│   ├── api/main.py                # FastAPI backend (~830 lines)
-│   └── web/src/                    # React 18 + Vite + Tailwind
+├── apps/api/                             # FastAPI backend, DDD-ish split
+│   ├── main.py                           # ~50 lines: wire routers + startup
+│   ├── shared/
+│   │   ├── common.py                     # cross-cutting: _json_safe, valid origins
+│   │   └── infrastructure/bq_client.py   # THE bigquery.Client singleton + config
+│   ├── routes/                           # thin HTTP layer per bounded context
+│   │   ├── meta.py    observability.py   quota.py   refresh.py   spa.py
+│   └── contexts/                         # per-context domain (pure, no I/O)
+│       ├── observability/
+│       │   ├── INVARIANTS.md             # INV-obs-001 (snapshot fallback), INV-obs-002 (refresh precheck)
+│       │   └── domain/
+│       │       ├── view_registry.py      # VIEWS + VIEWS_WITH_* + snapshot_name
+│       │       └── query_builder.py      # QuerySpec, build_query_spec, render_sql
+│       └── quota/
+│           ├── INVARIANTS.md             # INV-quota-001 (seats = licenseConfigs.total)
+│           └── domain/
+│               ├── license_parse.py      # pure: parse_license_configs(api_json)
+│               └── tier_allocation.py    # pure: allocate_seats(purchased, assigned, default)
+├── apps/web/src/                         # React 18 + Vite + Tailwind
 ├── infra/
-│   ├── sql_templates/views.sql.tmpl   # 21 BQ views
-│   ├── scripts/                    # doctor / preflight / bootstrap / apply_views
-│   └── INVARIANTS.md               # deploy-time invariants
-├── terraform/                      # dataset + sink + IAM + AR + Cloud Run
-├── docs/
-│   ├── DEPLOYMENT.md               # full deploy walkthrough + verification
-│   ├── TROUBLESHOOTING.md          # symptom → cause → fix
-│   ├── KNOWN_LIMITATIONS.md        # 20 items grouped by category
-│   ├── GE_CONSOLE_SETUP.md         # the one remaining manual GE toggle
-│   └── RUNBOOK.md                  # ops playbooks
-├── tests/unit/                     # 25 regression assertions
-├── playground/                     # audit-log reverse-engineering notes
+│   ├── sql_templates/views.sql.tmpl      # 21 BQ views
+│   └── contexts/deploy/
+│       ├── INVARIANTS.md                 # INV-001 (BQ_LOCATION follows REGION)
+│       └── application/                  # doctor / preflight / bootstrap / apply_views / import_orphans
+├── terraform/                            # dataset + sink + IAM + AR + Cloud Run
+├── docs/                                 # DEPLOYMENT / TROUBLESHOOTING / KNOWN_LIMITATIONS / GE_CONSOLE_SETUP / RUNBOOK
+├── tests/unit/                           # 25 regression assertions
+├── playground/                           # audit-log reverse-engineering notes
 ├── CHANGELOG.md
-├── Makefile                        # install / doctor / serve / deploy-* / resume
-├── pyproject.toml                  # Python ≥ 3.9
-└── LICENSE                         # Apache 2.0
+├── Makefile                              # install / doctor / serve / deploy-* / resume
+├── pyproject.toml                        # Python ≥ 3.9
+└── LICENSE                               # Apache 2.0
 ```
 
 ---

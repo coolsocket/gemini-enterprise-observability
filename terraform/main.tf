@@ -68,7 +68,7 @@ resource "google_bigquery_dataset" "ge_observability" {
 
 # ============================================================
 # 1a) Metadata tables that views depend on
-#     (data is populated by infra/scripts/bootstrap.py after apply)
+#     (data is populated by infra/contexts/deploy/application/bootstrap.py after apply)
 # ============================================================
 resource "google_bigquery_table" "engine_metadata" {
   project             = var.project_id
@@ -386,7 +386,7 @@ output "next_steps" {
 
     2. Seed metadata tables + fetch live licenseConfigs:
        PROJECT=${var.project_id} DATASET=${google_bigquery_dataset.ge_observability.dataset_id} \\
-       python3 infra/scripts/bootstrap.py
+       python3 infra/contexts/deploy/application/bootstrap.py
 
     3. Open GE Admin Console for each engine and enable:
        - OpenTelemetry Instrumentation      (generates trace IDs)
@@ -399,7 +399,7 @@ output "next_steps" {
 
     5. Apply the analytical views. Idempotent — safe to re-run:
        PROJECT=${var.project_id} DATASET=${google_bigquery_dataset.ge_observability.dataset_id} \\
-       python3 infra/scripts/apply_views.py
+       python3 infra/contexts/deploy/application/apply_views.py
 
     6. Optional: set deploy_cloud_run = true in terraform.tfvars, add invokers
        under iap_invokers, and re-apply. Otherwise 'make serve' locally.

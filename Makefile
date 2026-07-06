@@ -21,7 +21,7 @@ PORT ?= 8000
 # versions, ADC state, venv/node_modules/.env presence. Prints ✓/⚠/✗ with
 # actionable hints. Always exit 0 (informational).
 doctor:
-	@bash infra/scripts/doctor.sh
+	@bash infra/contexts/deploy/application/doctor.sh
 
 # First-time setup: venv + Python deps + npm deps + .env bootstrap + doctor.
 # Idempotent — safe to re-run. Doesn't do gcloud auth for you (interactive).
@@ -34,7 +34,7 @@ install: py-deps web-install
 	fi
 	@echo ""
 	@echo "→ Verifying environment..."
-	@bash infra/scripts/doctor.sh
+	@bash infra/contexts/deploy/application/doctor.sh
 	@echo ""
 	@echo "✓ Install complete. Next steps:"
 	@echo "  1. Edit .env with your project ID (if the file was just created)"
@@ -92,7 +92,7 @@ PROJECT ?=
 REGION ?= us-central1
 DATASET ?= ge_observability
 
-# Prefix stripped from actor emails at query time (see infra/scripts/apply_views.py).
+# Prefix stripped from actor emails at query time (see infra/contexts/deploy/application/apply_views.py).
 # Default 'sim-' matches nothing normally; override if your seed SAs use another prefix.
 SIM_PREFIX ?= sim-
 
@@ -135,14 +135,14 @@ tf-apply: tf-init
 # exemptions. Interactive by default; set CONFIRM=y to auto-accept in scripts.
 preflight: check-project
 	PROJECT=$(PROJECT) DATASET=$(DATASET) REGION=$(REGION) AR_REPO=$(AR_REPO) \
-	  bash infra/scripts/preflight.sh
+	  bash infra/contexts/deploy/application/preflight.sh
 
 # Recover from a partial/failed first `tf-apply` where resources leaked into
 # GCP but never made it into terraform state, causing all subsequent applies
 # to fail with `Error 409: Already Exists`. Idempotent — safe to re-run.
 tf-import-orphans: check-project tf-init
 	PROJECT=$(PROJECT) DATASET=$(DATASET) REGION=$(REGION) AR_REPO=$(AR_REPO) \
-	  bash infra/scripts/import_orphans.sh
+	  bash infra/contexts/deploy/application/import_orphans.sh
 
 # Step 3: build container image and push to Artifact Registry.
 # `SKIP_IMAGE=true` skips the Cloud Build submit — useful when you know the
@@ -162,11 +162,11 @@ image: check-project
 # so you can run this again after enabling GE Console toggles + a bit of
 # traffic.
 views: check-project py-deps
-	PROJECT=$(PROJECT) DATASET=$(DATASET) $(VENV)/bin/python3 infra/scripts/apply_views.py
+	PROJECT=$(PROJECT) DATASET=$(DATASET) $(VENV)/bin/python3 infra/contexts/deploy/application/apply_views.py
 
 # Step 5: ingest engine_metadata + resources_alive + seed quota_config
 bootstrap: check-project py-deps
-	PROJECT=$(PROJECT) DATASET=$(DATASET) $(VENV)/bin/python3 infra/scripts/bootstrap.py
+	PROJECT=$(PROJECT) DATASET=$(DATASET) $(VENV)/bin/python3 infra/contexts/deploy/application/bootstrap.py
 
 # ---------- Two-phase deploy (recommended for fresh projects) ----------
 # Phase A: everything that can succeed before GE has emitted any logs.
@@ -214,7 +214,7 @@ resume: check-project py-deps
 	    echo "  Dataset '$(DATASET)' does not exist — using BQ_LOCATION=$(BQ_LOCATION)."; \
 	  fi; \
 	  BQ_LOCATION=$${BQ_LOCATION:-$(BQ_LOCATION)} PROJECT=$(PROJECT) DATASET=$(DATASET) \
-	    $(VENV)/bin/python3 infra/scripts/apply_views.py
+	    $(VENV)/bin/python3 infra/contexts/deploy/application/apply_views.py
 	@echo ""
 	@echo "✓ Resume complete. Check the output above — 'applied N/21' should be 21"
 	@echo "  unless some views are still waiting for log-sink tables (need more"

@@ -45,7 +45,11 @@ if not PROJECT:
     print("ERROR: PROJECT env var required", file=sys.stderr)
     sys.exit(1)
 
-template = Path(__file__).resolve().parent.parent / "sql_templates" / "views.sql.tmpl"
+# Repo layout after Phase 4:
+#   infra/sql_templates/views.sql.tmpl
+#   infra/contexts/deploy/application/apply_views.py   ← this file
+# So four .parent hops from __file__ land on infra/.
+template = Path(__file__).resolve().parent.parent.parent.parent / "sql_templates" / "views.sql.tmpl"
 sql = template.read_text()
 sql = (sql
        .replace("{{PROJECT}}", PROJECT)
@@ -145,7 +149,7 @@ if skipped_waiting_logs:
     print("   These tables are auto-created by BigQuery the first time a matching log")
     print("   entry lands in the sink. Enable GE Console toggles per engine (OpenTelemetry")
     print("   Instrumentation, Prompt & Response Logging), send a bit of traffic, then re-")
-    print(f"   run: PROJECT={PROJECT} DATASET={DATASET} python3 infra/scripts/apply_views.py")
+    print(f"   run: PROJECT={PROJECT} DATASET={DATASET} python3 infra/contexts/deploy/application/apply_views.py")
 
 if skipped_missing_tf_table:
     print()

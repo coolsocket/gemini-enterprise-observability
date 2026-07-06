@@ -22,7 +22,7 @@
 #
 # Usage:
 #   PROJECT=<p> DATASET=ge_observability REGION=us-central1 AR_REPO=ge-observability \
-#     bash infra/scripts/preflight.sh
+#     bash infra/contexts/deploy/application/preflight.sh
 #
 # Exits 0 if everything's clean.
 # Exits 2 if there are conflicts requiring action (existing resources or

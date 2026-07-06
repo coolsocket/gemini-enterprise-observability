@@ -37,7 +37,7 @@ terraform apply
 2. **Bootstrap the BQ views** (after first log entries land):
    ```bash
    PROJECT=<your-project> DATASET=<dataset> \
-     python3 ../infra/scripts/apply_views.py
+     python3 ../infra/contexts/deploy/application/apply_views.py
    ```
 
 3. **Build + push the container image** that Cloud Run will run:
