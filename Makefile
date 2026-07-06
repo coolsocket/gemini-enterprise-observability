@@ -58,15 +58,17 @@ web-build:
 # main.py reads BQ_PROJECT/BQ_DATASET/SIM_PREFIX at import time — need to
 # thread them into uvicorn's env, not just Make's. `make serve PROJECT=foo`
 # without the env-var prefix silently drops PROJECT and fails at import.
+# Run from repo root (not `cd apps/api`) so absolute imports like
+# `from apps.api.shared.infrastructure.bq_client import ...` resolve.
 api-run: check-project
-	. $(VENV)/bin/activate && cd apps/api && \
 	BQ_PROJECT=$(PROJECT) BQ_DATASET=$(DATASET) SIM_PREFIX=$(SIM_PREFIX) \
-	  uvicorn main:app --host 127.0.0.1 --port $(PORT) --reload
+	  $(VENV)/bin/uvicorn apps.api.main:app --app-dir . \
+	    --host 127.0.0.1 --port $(PORT) --reload
 
 serve: check-project web-build
-	. $(VENV)/bin/activate && cd apps/api && \
 	BQ_PROJECT=$(PROJECT) BQ_DATASET=$(DATASET) SIM_PREFIX=$(SIM_PREFIX) \
-	  uvicorn main:app --host 127.0.0.1 --port $(PORT)
+	  $(VENV)/bin/uvicorn apps.api.main:app --app-dir . \
+	    --host 127.0.0.1 --port $(PORT)
 
 dev:
 	@echo "Run in two terminals:"

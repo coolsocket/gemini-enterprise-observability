@@ -40,6 +40,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import bigquery
 
+# Shared runtime config + BQ client — extracted 2026-07-06.
+# All routes should use `_bq` from here (do not re-instantiate bigquery.Client).
+from apps.api.shared.infrastructure.bq_client import (
+    bq as _bq,
+    PROJECT,
+    DATASET,
+    SIM_PREFIX,
+)
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ge-obs")
 
@@ -47,12 +56,6 @@ log = logging.getLogger("ge-obs")
 # Set to 0 to disable the background loop entirely (still exposed via
 # POST /api/refresh/seats).
 LICENSE_REFRESH_INTERVAL_SEC = int(os.environ.get("LICENSE_REFRESH_INTERVAL_SEC", str(24 * 3600)))
-
-PROJECT = os.environ.get("BQ_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
-DATASET = os.environ.get("BQ_DATASET", "ge_observability")
-SIM_PREFIX = os.environ.get("SIM_PREFIX", "sim-")
-if not PROJECT:
-    raise RuntimeError("BQ_PROJECT (or GOOGLE_CLOUD_PROJECT) env var required")
 
 VIEWS: dict[str, dict[str, str]] = {
     "v_user_persona":             {"label": "用户画像",           "desc": "POWER_USER / ACTIVE_CONSUMER / TRIAL / BUILDER / EXPLORER / LURKER / AUTOMATION / SIMULATED"},
@@ -94,7 +97,7 @@ def snapshot_name(view: str) -> str:
     return "s_" + view[2:] if view.startswith("v_") else view
 
 app = FastAPI(title="GE Observability", version="2.0")
-_bq = bigquery.Client(project=PROJECT)
+# _bq now imported from shared.infrastructure.bq_client (see top of file).
 WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 

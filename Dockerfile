@@ -32,10 +32,11 @@ ENV BQ_DATASET="ge_observability"
 
 EXPOSE 8080
 
-# Use gunicorn for prod (uvicorn workers under gunicorn for stability)
+# Use gunicorn for prod (uvicorn workers under gunicorn for stability).
+# Run from repo root (WORKDIR=/app) so `apps.api.main:app` absolute-imports
+# resolve (needed for `from apps.api.shared.infrastructure.bq_client import …`).
 CMD exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker \
     --bind 0.0.0.0:${PORT} \
-    --chdir apps/api \
     --access-logfile - \
     --error-logfile - \
-    main:app
+    apps.api.main:app
