@@ -582,11 +582,30 @@ def refresh_seats() -> dict[str, Any]:
 
 @app.post("/api/refresh")
 def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
-    """Re-materialize all snapshot tables. Returns per-table timing."""
+    """Re-materialize all snapshot tables. Returns per-table timing.
+
+    On fresh deploys, some v_* views won't exist yet (source log-sink
+    tables haven't materialized). Pre-check INFORMATION_SCHEMA.VIEWS so
+    we can skip missing views quietly instead of logging every one as
+    an ERROR (they're expected transient state, not operational alarms).
+    """
     import time
+    # Pre-check: which v_* views actually exist right now?
+    existing_views = {
+        r.table_name
+        for r in _bq.query(
+            f"SELECT table_name FROM `{PROJECT}.{DATASET}.INFORMATION_SCHEMA.VIEWS`"
+        ).result()
+    }
     results = []
     for view_name in VIEWS:
         snap = snapshot_name(view_name)
+        if view_name not in existing_views:
+            log.info("refresh skipped: %s (view %s not built yet — likely "
+                     "waiting for log-sink source table)", snap, view_name)
+            results.append({"snapshot": snap, "ok": False, "skipped": True,
+                            "reason": f"view {view_name} does not exist"})
+            continue
         start = time.time()
         try:
             _bq.query(
@@ -603,7 +622,10 @@ def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
             ).result()
             results.append({"snapshot": snap, "row_count": row_count, "seconds": round(dur, 2), "ok": True})
         except Exception as e:
-            log.error("refresh failed: %s — %s", snap, e)
+            # Real unexpected error (SQL syntax, permission, quota, …).
+            # Missing-view case is caught by the pre-check above and logged
+            # at INFO — this branch keeps ERROR for genuine problems.
+            log.error("refresh unexpected failure: %s — %s", snap, e)
             results.append({"snapshot": snap, "ok": False, "error": str(e)[:200]})
     # Also refresh live licenseConfigs so seat panel stays current.
     seats: dict[str, Any]
