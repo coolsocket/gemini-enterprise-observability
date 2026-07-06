@@ -94,13 +94,13 @@ DATASET ?= ge_observability
 # Default 'sim-' matches nothing normally; override if your seed SAs use another prefix.
 SIM_PREFIX ?= sim-
 
-# BigQuery dataset location — separate from REGION (which is for Cloud Run +
-# Artifact Registry). Default is the US multi-region for maximum availability.
-# Common single-regions: `asia-southeast1` (Singapore), `asia-east1` (Taiwan),
-# `europe-west1` (Belgium), `us-central1`. Data-residency laws usually want
-# a single region; free-tier work can stay on the `US` multi-region.
+# BigQuery dataset location. Default: co-locate with REGION (per INV-001 in
+# infra/INVARIANTS.md) so operators who set only REGION don't accidentally
+# end up with cross-region compute+data. To explicitly opt into a
+# multi-region (US / EU / asia) or cross-region setup, set BQ_LOCATION
+# explicitly in .env or on the make command line.
 # Cannot be changed after the dataset is created — pick once, live with it.
-BQ_LOCATION ?= US
+BQ_LOCATION ?= $(REGION)
 
 # Artifact Registry (not the deprecated gcr.io). Repository is created by
 # terraform (google_artifact_registry_repository.dashboard). Image tag format:
