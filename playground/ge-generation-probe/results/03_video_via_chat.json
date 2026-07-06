@@ -1,0 +1,127 @@
+[{
+  "answer": {
+    "state": "IN_PROGRESS",
+    "replies": [
+      {
+        "groundedContent": {
+          "content": {
+            "role": "model",
+            "text": "**Generating Ocean Sunset**\n",
+            "thought": true
+          }
+        },
+        "createTime": "2026-07-03T06:23:15.206224237Z"
+      }
+    ]
+  },
+  "sessionInfo": {
+    "session": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID"
+  },
+  "assistToken": "ASSIST_TOKEN"
+}
+,
+{
+  "answer": {
+    "state": "IN_PROGRESS",
+    "replies": [
+      {
+        "groundedContent": {
+          "content": {
+            "role": "model",
+            "text": "**Generating Ocean Sunset**\n",
+            "thought": true
+          }
+        },
+        "createTime": "2026-07-03T06:23:20.776919957Z"
+      }
+    ]
+  },
+  "sessionInfo": {
+    "session": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID"
+  },
+  "assistToken": "ASSIST_TOKEN"
+}
+,
+{
+  "answer": {
+    "state": "IN_PROGRESS",
+    "replies": [
+      {
+        "groundedContent": {
+          "content": {
+            "role": "model",
+            "text": "**Generating video. This may take a few minutes...**\n",
+            "thought": true
+          }
+        },
+        "createTime": "2026-07-03T06:23:20.838732180Z"
+      }
+    ]
+  },
+  "sessionInfo": {
+    "session": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID"
+  },
+  "assistToken": "ASSIST_TOKEN"
+}
+,
+{
+  "answer": {
+    "state": "IN_PROGRESS",
+    "replies": [
+      {
+        "groundedContent": {
+          "content": {
+            "role": "model",
+            "file": {
+              "mimeType": "video/mp4",
+              "fileId": "GENERATED_FILE_UUID"
+            }
+          }
+        },
+        "createTime": "2026-07-03T06:24:25.112824752Z"
+      },
+      {
+        "groundedContent": {
+          "content": {
+            "role": "model",
+            "text": "{\"status\": \"success\", \"detail\": \"Video generated successfully and should be saved to artifact.\", \"num_reference_images_used\": 0}"
+          }
+        },
+        "createTime": "2026-07-03T06:24:25.112824752Z"
+      }
+    ]
+  },
+  "sessionInfo": {
+    "session": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID"
+  },
+  "assistToken": "ASSIST_TOKEN"
+}
+,
+{
+  "answer": {
+    "name": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID/assistAnswers/ANSWER_ID",
+    "state": "SUCCEEDED",
+    "replies": [
+      {
+        "groundedContent": {},
+        "replyId": "REPLY_ID",
+        "createTime": "2026-07-03T06:23:20.838732180Z"
+      },
+      {
+        "groundedContent": {},
+        "replyId": "REPLY_ID",
+        "createTime": "2026-07-03T06:24:25.112824752Z"
+      },
+      {
+        "groundedContent": {},
+        "replyId": "REPLY_ID",
+        "createTime": "2026-07-03T06:24:25.112824752Z"
+      }
+    ]
+  },
+  "sessionInfo": {
+    "session": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID"
+  },
+  "assistToken": "ASSIST_TOKEN"
+}
+]

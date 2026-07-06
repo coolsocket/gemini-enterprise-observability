@@ -1,0 +1,68 @@
+[{
+  "answer": {
+    "state": "IN_PROGRESS",
+    "replies": [
+      {
+        "groundedContent": {
+          "content": {
+            "role": "model",
+            "text": "4\n\n"
+          }
+        },
+        "createTime": "2026-07-03T06:22:26.141899130Z"
+      }
+    ]
+  },
+  "sessionInfo": {
+    "session": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID"
+  },
+  "assistToken": "ASSIST_TOKEN"
+}
+,
+{
+  "answer": {
+    "state": "IN_PROGRESS",
+    "replies": [
+      {
+        "groundedContent": {
+          "content": {
+            "role": "model",
+            "inlineData": {
+              "mimeType": "application/json+suggestions",
+              "data": "eyJyZWNvbW1lbmRlZFF1ZXN0aW9uc1Jlc3BvbnNlIjp7InF1ZXN0aW9ucyI6WyJXaGF0IGlzIDQrND8iLCJDYW4geW91IGRvIG1vcmUgY29tcGxleCBtYXRoPyIsIkhvdyBmYXN0IGNhbiB5b3UgY2FsY3VsYXRlPyJdfX0="
+            }
+          }
+        },
+        "createTime": "2026-07-03T06:22:26.402659804Z"
+      }
+    ]
+  },
+  "sessionInfo": {
+    "session": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID"
+  },
+  "assistToken": "ASSIST_TOKEN"
+}
+,
+{
+  "answer": {
+    "name": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID/assistAnswers/ANSWER_ID",
+    "state": "SUCCEEDED",
+    "replies": [
+      {
+        "groundedContent": {},
+        "replyId": "REPLY_ID",
+        "createTime": "2026-07-03T06:22:26.141899130Z"
+      },
+      {
+        "groundedContent": {},
+        "replyId": "REPLY_ID",
+        "createTime": "2026-07-03T06:22:26.402659804Z"
+      }
+    ]
+  },
+  "sessionInfo": {
+    "session": "projects/PROJECT_NUMBER/locations/global/collections/default_collection/engines/ENGINE_ID/sessions/SESSION_ID"
+  },
+  "assistToken": "ASSIST_TOKEN"
+}
+]

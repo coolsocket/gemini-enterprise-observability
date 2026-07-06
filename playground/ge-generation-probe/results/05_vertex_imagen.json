@@ -1,0 +1,20 @@
+{
+  "error": {
+    "code": 403,
+    "message": "Permission 'aiplatform.endpoints.predict' denied on resource '//aiplatform.googleapis.com/projects/PROJECT_ID/locations/us-central1/publishers/google/models/imagegeneration' (or it may not exist). Remediate access with this Troubleshooter URL or share it with your administrator - https://console.cloud.google.com/iam-admin/troubleshooter;errorId=REDACTED .",
+    "status": "PERMISSION_DENIED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "IAM_PERMISSION_DENIED",
+        "domain": "aiplatform.googleapis.com",
+        "metadata": {
+          "resource": "projects/PROJECT_ID/locations/us-central1/publishers/google/models/imagegeneration",
+          "troubleshooter_url": "https://console.cloud.google.com/iam-admin/troubleshooter;errorId=REDACTED",
+          "error_info_id": "CiQwMTlmMjZhNi04YTc0LTdkZDktYmJhYi02OTgwMjc4MGE3Y2MSWXByb2plY3RzL215LXdlYnNpdGUtNDE3MDEzL2xvY2F0aW9ucy91cy1jZW50cmFsMS9wdWJsaXNoZXJzL2dvb2dsZS9tb2RlbHMvaW1hZ2VnZW5lcmF0aW9u",
+          "permission": "aiplatform.endpoints.predict"
+        }
+      }
+    ]
+  }
+}
