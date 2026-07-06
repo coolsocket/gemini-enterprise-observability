@@ -33,7 +33,7 @@ import logging
 import os
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
@@ -146,9 +146,9 @@ VIEW_TIME_COL: dict[str, str | None] = {
 }
 
 
-def _rows(view: str, limit: int = 1000, origin: str | None = None,
-          engine_id: str | None = None, live: bool = False,
-          since_hours: int | None = None) -> list[dict[str, Any]]:
+def _rows(view: str, limit: int = 1000, origin: Optional[str] = None,
+          engine_id: Optional[str] = None, live: bool = False,
+          since_hours: Optional[int] = None) -> list[dict[str, Any]]:
     if view not in VIEWS:
         raise HTTPException(status_code=404, detail=f"Unknown view: {view}")
     where_clauses = []
@@ -229,9 +229,9 @@ def list_views() -> dict[str, Any]:
 
 
 @app.get("/api/v/{view}")
-def view_rows(view: str, limit: int = 1000, origin: str | None = None,
-              engine_id: str | None = None, live: bool = False,
-              since_hours: int | None = None) -> JSONResponse:
+def view_rows(view: str, limit: int = 1000, origin: Optional[str] = None,
+              engine_id: Optional[str] = None, live: bool = False,
+              since_hours: Optional[int] = None) -> JSONResponse:
     rows = _rows(view, limit=limit, origin=origin, engine_id=engine_id,
                  live=live, since_hours=since_hours)
     return JSONResponse(
@@ -373,7 +373,7 @@ def agent_deep_dive(agent_id: str) -> JSONResponse:
 
 
 @app.get("/api/users")
-def list_users(since_hours: int | None = None) -> dict[str, Any]:
+def list_users(since_hours: Optional[int] = None) -> dict[str, Any]:
     """All actors who've shown up anywhere, with rich per-user dimensions for picker."""
     time_filter = ""
     if since_hours and since_hours > 0:
@@ -709,8 +709,8 @@ def quota_set_tier(email: str, tier: str, by: str = "manual", notes: str = "") -
 
 
 @app.get("/api/summary")
-def summary(origin: str | None = None, engine_id: str | None = None, live: bool = False,
-            since_hours: int | None = None) -> dict[str, Any]:
+def summary(origin: Optional[str] = None, engine_id: Optional[str] = None, live: bool = False,
+            since_hours: Optional[int] = None) -> dict[str, Any]:
     """KPI summary. ?origin=HUMAN filters out service accounts.
 
     Restructured to surface two-group semantics:

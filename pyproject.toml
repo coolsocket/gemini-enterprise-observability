@@ -1,0 +1,18 @@
+# Minimal PEP 621 metadata — declares the Python range we support so that
+# `pip install` / `pyenv` / IDEs warn up-front instead of failing with a
+# confusing runtime error like the `str | None` PEP 604 mismatch we hit on
+# Python 3.9.6 (2026-07-06).
+#
+# Runtime deps are still in apps/api/requirements.txt (pip installs from that
+# via `make py-deps`). This file is here purely for the metadata + python
+# version constraint.
+[project]
+name = "ge-observability"
+version = "2.0.0"
+description = "Self-hosted observability dashboard for Gemini Enterprise: adoption, governance, audit."
+requires-python = ">=3.9"
+readme = "README.md"
+license = { file = "LICENSE" }
+
+[project.urls]
+Repository = "https://github.com/coolsocket/gemini-enterprise-observability"
