@@ -243,6 +243,24 @@ gcloud run services proxy ge-observability --port 8080 --region us-central1
 open http://localhost:8080
 ```
 
+### One-command recovery: `make resume`
+
+The 90% case after a failed deploy: a fix has been pushed upstream and
+you need to `git pull && re-run views`. `make resume PROJECT=<p>` does
+that in one shot:
+
+```bash
+make resume PROJECT=responsive-lens-421108 DATASET=ge_observability
+```
+
+Under the hood:
+1. `git pull --ff-only origin main` (safe if you have no local changes; skipped if offline / non-ff)
+2. Queries the existing dataset via `bq show` to auto-detect its **actual `BQ_LOCATION`** — so preflight's region-mismatch gate doesn't trip on state that's already on GCP.
+3. Runs `apply_views.py`, which is idempotent: 21 `CREATE OR REPLACE VIEW`s that no-op when nothing changed, and successfully rebuild on the affected views when a schema-drift or dependency fix was pushed.
+
+Total time: ~30-60 seconds. Doesn't touch Terraform, image, or bootstrap
+— use `make deploy-infra` for those.
+
 ### Resuming after a failure (idempotency map)
 
 All deploy steps are idempotent — none of them delete data. But some are

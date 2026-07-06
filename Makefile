@@ -1,6 +1,6 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
         tf-init tf-plan tf-apply tf-import-orphans preflight views bootstrap image \
-        deploy-infra deploy-views deploy all clean
+        deploy-infra deploy-views deploy resume all clean
 
 PY ?= python3
 VENV := .venv
@@ -155,6 +155,32 @@ deploy-views: py-deps views
 deploy: py-deps tf-apply image bootstrap views
 	@echo ""
 	@echo "✓ Deploy complete."
+
+# One-command recovery after a failed deploy — the common case is a schema-
+# drift fix in views has been pushed and the operator just needs to `git pull
+# && make deploy-views`. This target does both, and auto-detects the existing
+# dataset's BQ_LOCATION from GCP (so preflight's region-mismatch gate doesn't
+# trip on state that already exists). Safe to re-run.
+resume: check-project
+	@echo "→ Pulling latest from origin..."
+	@git pull --ff-only origin main || echo "  (git pull skipped — non-ff or offline; using local tree)"
+	@echo ""
+	@echo "→ Detecting existing dataset location on GCP..."
+	@detected_loc=$$(bq --project_id=$(PROJECT) show --format=json $(DATASET) 2>/dev/null | \
+	    python3 -c "import json,sys; print(json.load(sys.stdin).get('location','') or '')" 2>/dev/null); \
+	  if [ -n "$$detected_loc" ]; then \
+	    echo "  Dataset '$(DATASET)' exists at BQ_LOCATION=$$detected_loc — using that."; \
+	    export BQ_LOCATION="$$detected_loc"; \
+	  else \
+	    echo "  Dataset '$(DATASET)' does not exist — using BQ_LOCATION=$(BQ_LOCATION)."; \
+	  fi; \
+	  $(MAKE) py-deps; \
+	  BQ_LOCATION=$${BQ_LOCATION:-$(BQ_LOCATION)} PROJECT=$(PROJECT) DATASET=$(DATASET) \
+	    $(VENV)/bin/python3 infra/scripts/apply_views.py
+	@echo ""
+	@echo "✓ Resume complete. Check the output above — 'applied N/21' should be 21"
+	@echo "  unless some views are still waiting for log-sink tables (need more"
+	@echo "  GE traffic + a re-run of 'make resume' or 'make deploy-views')."
 
 # Full first-time install: install web+py deps, then the two-phase deploy.
 all: install deploy-infra
