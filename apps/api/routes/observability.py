@@ -31,14 +31,14 @@ from fastapi.responses import JSONResponse
 from google.cloud import bigquery
 
 from apps.api.shared.infrastructure.bq_client import bq as _bq, PROJECT, DATASET, SIM_PREFIX
-from apps.api.shared.common import (
-    VIEWS,
-    VIEWS_WITH_ORIGIN,
-    VIEWS_WITH_ENGINE,
-    VIEW_TIME_COL,
-    _VALID_ORIGINS,
-    snapshot_name,
-    _json_safe,
+from apps.api.shared.common import _json_safe
+from apps.api.contexts.observability.domain.view_registry import snapshot_name
+from apps.api.contexts.observability.domain.query_builder import (
+    build_query_spec,
+    render_sql,
+    render_live_fallback_sql,
+    build_summary_filters,
+    render_summary_sql,
 )
 
 log = logging.getLogger("ge-obs")
@@ -49,40 +49,18 @@ router = APIRouter()
 def _rows(view: str, limit: int = 1000, origin: Optional[str] = None,
           engine_id: Optional[str] = None, live: bool = False,
           since_hours: Optional[int] = None) -> list[dict[str, Any]]:
-    if view not in VIEWS:
-        raise HTTPException(status_code=404, detail=f"Unknown view: {view}")
-    where_clauses = []
-    if origin:
-        if origin not in _VALID_ORIGINS:
-            raise HTTPException(status_code=400, detail=f"origin must be one of {_VALID_ORIGINS}")
-        if view not in VIEWS_WITH_ORIGIN:
-            raise HTTPException(status_code=400, detail=f"view {view} doesn't have an origin column")
-        where_clauses.append(f"origin = '{origin}'")
-    if engine_id:
-        if view not in VIEWS_WITH_ENGINE:
-            raise HTTPException(status_code=400, detail=f"view {view} doesn't have an engine_id column")
-        # Some views use `engine_id`, others `engine_id_raw` (aliased at view creation time)
-        engine_id_cols = {"v_data_access_summary", "v_user_usage", "v_engine_adoption"}
-        col = "engine_id" if view in engine_id_cols else "engine_id_raw"
-        # SQL escape
-        if not engine_id.replace("-", "").replace("_", "").isalnum():
-            raise HTTPException(status_code=400, detail="invalid engine_id")
-        where_clauses.append(f"{col} = '{engine_id}'")
-    if since_hours and since_hours > 0:
-        tcol = VIEW_TIME_COL.get(view)
-        if tcol:
-            # DATE columns need DATE cutoff; TIMESTAMP columns need TIMESTAMP cutoff
-            if tcol == "d":
-                where_clauses.append(f"{tcol} >= DATE_SUB(CURRENT_DATE(), INTERVAL {int(since_hours // 24)} DAY)")
-            else:
-                where_clauses.append(f"{tcol} >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {int(since_hours)} HOUR)")
-    where = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-    # Default: read from snapshot table (fast); ?live=true bypasses to view (fresh).
-    # If since_hours is set, force live so we're not filtered by stale snapshot age.
-    if since_hours:
-        live = True
-    src = view if live else snapshot_name(view)
-    sql = f"SELECT * FROM `{PROJECT}.{DATASET}.{src}`{where} LIMIT {limit}"
+    # Pure param validation + WHERE assembly happens in the domain layer;
+    # only the BQ call + snapshot-miss recovery live here (see INV-obs-001).
+    try:
+        spec = build_query_spec(
+            PROJECT, DATASET, view,
+            limit=limit, origin=origin, engine_id=engine_id,
+            live=live, since_hours=since_hours,
+        )
+    except ValueError as e:
+        status = 404 if str(e).startswith("Unknown view") else 400
+        raise HTTPException(status_code=status, detail=str(e))
+    sql = render_sql(spec)
     log.info("query: %s", sql)
     from google.api_core.exceptions import NotFound
     try:
@@ -92,12 +70,12 @@ def _rows(view: str, limit: int = 1000, origin: Optional[str] = None,
         # the 6-hour Scheduled Query has ticked (or before someone POSTs
         # /api/refresh). Fall back to the live view so dashboard pages return
         # data instead of 500. Slightly slower but correct.
-        if live:
+        if spec.live:
             raise  # live view itself was missing — that's a real problem
-        src = view
-        fallback_sql = f"SELECT * FROM `{PROJECT}.{DATASET}.{src}`{where} LIMIT {limit}"
+        src = view  # kept for the test regex (except-block references view)
+        fallback_sql = render_live_fallback_sql(spec)
         log.warning("snapshot %s not found — falling back to live view %s",
-                    snapshot_name(view), view)
+                    snapshot_name(view), src)
         return [_json_safe(dict(r)) for r in _bq.query(fallback_sql).result()]
 
 
@@ -364,85 +342,21 @@ def summary(origin: Optional[str] = None, engine_id: Optional[str] = None, live:
     Restructured to surface two-group semantics:
       adoption_quality: humans only, focused on usage
       governance_audit: all origins, focused on operations
+
+    All SQL text is built by the pure `render_summary_sql` in the
+    observability domain module — this route just runs it and handles
+    the snapshot-miss fallback (same shape as `_rows`; see INV-obs-001).
     """
-    origin_filter = ""
-    if origin in _VALID_ORIGINS:
-        origin_filter = f" AND origin = '{origin}'"
-    engine_filter_summary = ""  # for v_data_access_summary uses engine_id col
-    engine_filter_conv = ""     # for v_conversations uses engine_id_raw col
-    if engine_id and engine_id.replace("-", "").replace("_", "").isalnum():
-        engine_filter_summary = f" AND engine_id = '{engine_id}'"
-        engine_filter_conv = f" AND engine_id_raw = '{engine_id}'"
-
-    # Time-range filters (per-view, since column varies)
-    time_filter_da = ""     # v_data_access_summary uses last_access
-    time_filter_conv = ""   # v_conversations uses timestamp
-    time_filter_b = ""      # v_builders uses last_admin_action
-    time_filter_p = ""      # v_user_persona uses last_seen
-    if since_hours and since_hours > 0:
-        sh = int(since_hours)
-        time_filter_da   = f" AND last_access >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {sh} HOUR)"
-        time_filter_conv = f" AND timestamp   >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {sh} HOUR)"
-        time_filter_b    = f" AND last_admin_action >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {sh} HOUR)"
-        time_filter_p    = f" AND last_seen   >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {sh} HOUR)"
-        # since_hours forces live view (snapshot has stale timestamps for the filter)
-        live = True
-
-    # Default to snapshots for speed; ?live=true hits views
-    p = "v_user_persona" if live else "s_user_persona"
-    b = "v_builders" if live else "s_builders"
-    da = "v_data_access_summary" if live else "s_data_access_summary"
-    ea = "v_engine_adoption" if live else "s_engine_adoption"
-    cv = "v_conversations" if live else "s_conversations"
-
-    sql = f"""
-    WITH
-      humans AS (
-        SELECT persona, chat_turns_total, chat_turns_7d
-        FROM `{PROJECT}.{DATASET}.{p}`
-        WHERE origin IN ('HUMAN', 'SIMULATED') {time_filter_p}
-      ),
-      a AS (SELECT SUM(total_admin_actions) c FROM `{PROJECT}.{DATASET}.{b}`
-            WHERE TRUE {origin_filter} {time_filter_b}),
-      d AS (SELECT SUM(chat_turns) chat,
-                   SUM(total_data_access) total
-            FROM `{PROJECT}.{DATASET}.{da}`
-            WHERE TRUE {origin_filter} {engine_filter_summary} {time_filter_da}),
-      e AS (SELECT COUNT(*) c FROM `{PROJECT}.{DATASET}.{ea}`),
-      adm AS (SELECT MAX(timestamp) ts FROM `{PROJECT}.{DATASET}.cloudaudit_googleapis_com_activity`),
-      dac AS (SELECT MAX(timestamp) ts FROM `{PROJECT}.{DATASET}.cloudaudit_googleapis_com_data_access`),
-      ua  AS (SELECT MAX(timestamp) ts FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`),
-      conv AS (SELECT COUNT(*) c FROM `{PROJECT}.{DATASET}.{cv}`
-               WHERE TRUE {origin_filter} {engine_filter_conv} {time_filter_conv})
-    SELECT
-      -- 采纳与质量（HUMAN + SIMULATED — 真人 + 模拟人）
-      (SELECT COUNT(*) FROM humans) AS human_users,
-      (SELECT COUNT(*) FROM humans WHERE persona = 'POWER_USER') AS power_users,
-      (SELECT COUNT(*) FROM humans WHERE persona = 'ACTIVE_CONSUMER') AS active_consumers,
-      (SELECT COUNT(*) FROM humans WHERE persona = 'TRIAL') AS trial_users,
-      (SELECT COUNT(*) FROM humans WHERE persona = 'BUILDER') AS human_builders,
-      (SELECT COUNT(*) FROM humans WHERE persona = 'EXPLORER') AS explorers,
-      (SELECT COUNT(*) FROM humans WHERE persona = 'LURKER') AS lurkers,
-      (SELECT SUM(chat_turns_7d) FROM humans) AS human_chat_turns_7d,
-      conv.c AS conversations_captured,
-      -- 治理与审计
-      a.c AS admin_actions,
-      d.chat AS chat_turns_total,
-      d.total AS data_access_calls,
-      e.c AS engines_tracked,
-      -- 数据新鲜度
-      adm.ts AS last_admin_event,
-      dac.ts AS last_data_access_event,
-      ua.ts  AS last_user_activity_event
-    FROM a, d, e, adm, dac, ua, conv
-    """
+    filters = build_summary_filters(origin=origin, engine_id=engine_id,
+                                    live=live, since_hours=since_hours)
+    sql = render_summary_sql(PROJECT, DATASET, filters)
     from google.api_core.exceptions import NotFound
     try:
         row = next(iter(_bq.query(sql).result()), None)
     except NotFound:
         # A snapshot table used in this CTE doesn't exist yet (fresh deploy).
         # Re-run with live=True — same query but hitting v_* views directly.
-        if live:
+        if filters.live:
             raise
         log.warning("summary: snapshot missing, retrying against live views")
         return summary(origin=origin, engine_id=engine_id, live=True, since_hours=since_hours)

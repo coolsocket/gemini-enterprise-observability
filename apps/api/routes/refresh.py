@@ -40,6 +40,7 @@ from apps.api.shared.common import (
     snapshot_name,
     _json_safe,
 )
+from apps.api.contexts.quota.domain.license_parse import parse_license_configs
 
 log = logging.getLogger("ge-obs")
 
@@ -69,6 +70,10 @@ def _fetch_and_persist_license_configs() -> dict[str, Any]:
 
     Uses ADC (same identity as BigQuery), so no shell-out to gcloud. Returns
     a summary dict; raises on unrecoverable errors so the caller can log.
+
+    The aggregation logic lives in the quota domain
+    (`contexts/quota/domain/license_parse.py`) — this function is now just
+    the I/O shell: HTTP fetch + MERGE persistence.
     """
     import google.auth
     import google.auth.transport.requests
@@ -82,15 +87,12 @@ def _fetch_and_persist_license_configs() -> dict[str, Any]:
     with urllib.request.urlopen(req, timeout=30) as r:
         data = json.loads(r.read().decode() or "{}")
     configs = data.get("licenseConfigs", []) or []
-    if not configs:
-        return {"total_seats": 0, "config_count": 0, "by_tier": {}, "note": "no licenseConfigs returned"}
-    total = 0
-    by_tier: dict[str, int] = {}
-    for c in configs:
-        cnt = int(c.get("licenseCount", "0"))
-        total += cnt
-        tier = c.get("subscriptionTier", "UNKNOWN")
-        by_tier[tier] = by_tier.get(tier, 0) + cnt
+    parsed = parse_license_configs(configs)
+    if parsed["config_count"] == 0:
+        # Preserve legacy response shape: `note` present, no MERGE call.
+        return {"total_seats": 0, "config_count": 0, "by_tier": {},
+                "note": parsed.get("note", "no licenseConfigs returned")}
+
     # Persist via MERGE (update-or-insert)
     def _merge(k: str, v: str) -> None:
         _bq.query(
@@ -107,12 +109,14 @@ def _fetch_and_persist_license_configs() -> dict[str, Any]:
                 query_parameters=[bigquery.ScalarQueryParameter("v", "STRING", v)]
             ),
         ).result()
-    _merge("license.total_seats", str(total))
-    _merge("license.config_count", str(len(configs)))
-    _merge("license.raw", json.dumps(configs))
-    for tier, cnt in by_tier.items():
+    _merge("license.total_seats", str(parsed["total_seats"]))
+    _merge("license.config_count", str(parsed["config_count"]))
+    _merge("license.raw", parsed["raw_json"])
+    for tier, cnt in parsed["by_tier"].items():
         _merge(f"license.seats.{tier}", str(cnt))
-    return {"total_seats": total, "config_count": len(configs), "by_tier": by_tier}
+    return {"total_seats": parsed["total_seats"],
+            "config_count": parsed["config_count"],
+            "by_tier": parsed["by_tier"]}
 
 
 @router.post("/api/refresh/seats")
