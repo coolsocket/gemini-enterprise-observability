@@ -25,10 +25,13 @@ Routes
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import decimal
+import json
 import logging
 import os
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +42,11 @@ from google.cloud import bigquery
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("ge-obs")
+
+# License refresh cadence for the seat-count auto-refresh loop (24h default).
+# Set to 0 to disable the background loop entirely (still exposed via
+# POST /api/refresh/seats).
+LICENSE_REFRESH_INTERVAL_SEC = int(os.environ.get("LICENSE_REFRESH_INTERVAL_SEC", str(24 * 3600)))
 
 PROJECT = os.environ.get("BQ_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
 DATASET = os.environ.get("BQ_DATASET", "ge_observability")
@@ -497,6 +505,67 @@ def refresh_status() -> dict[str, Any]:
     }
 
 
+def _fetch_and_persist_license_configs() -> dict[str, Any]:
+    """Pull live licenseConfigs from Discovery Engine and MERGE into quota_config.
+
+    Uses ADC (same identity as BigQuery), so no shell-out to gcloud. Returns
+    a summary dict; raises on unrecoverable errors so the caller can log.
+    """
+    import google.auth
+    import google.auth.transport.requests
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    creds.refresh(google.auth.transport.requests.Request())
+    token = creds.token
+    url = f"https://discoveryengine.googleapis.com/v1alpha/projects/{PROJECT}/locations/global/licenseConfigs"
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("x-goog-user-project", PROJECT)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        data = json.loads(r.read().decode() or "{}")
+    configs = data.get("licenseConfigs", []) or []
+    if not configs:
+        return {"total_seats": 0, "config_count": 0, "by_tier": {}, "note": "no licenseConfigs returned"}
+    total = 0
+    by_tier: dict[str, int] = {}
+    for c in configs:
+        cnt = int(c.get("licenseCount", "0"))
+        total += cnt
+        tier = c.get("subscriptionTier", "UNKNOWN")
+        by_tier[tier] = by_tier.get(tier, 0) + cnt
+    # Persist via MERGE (update-or-insert)
+    def _merge(k: str, v: str) -> None:
+        _bq.query(
+            f"""
+            MERGE `{PROJECT}.{DATASET}.quota_config` t
+            USING (SELECT '{k}' k, @v v) s
+            ON t.key = s.k
+            WHEN MATCHED THEN UPDATE SET value = s.v, updated_at = CURRENT_TIMESTAMP(),
+                                          updated_by = 'license-api'
+            WHEN NOT MATCHED THEN INSERT (key, value, updated_at, updated_by)
+              VALUES (s.k, s.v, CURRENT_TIMESTAMP(), 'license-api')
+            """,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("v", "STRING", v)]
+            ),
+        ).result()
+    _merge("license.total_seats", str(total))
+    _merge("license.config_count", str(len(configs)))
+    _merge("license.raw", json.dumps(configs))
+    for tier, cnt in by_tier.items():
+        _merge(f"license.seats.{tier}", str(cnt))
+    return {"total_seats": total, "config_count": len(configs), "by_tier": by_tier}
+
+
+@app.post("/api/refresh/seats")
+def refresh_seats() -> dict[str, Any]:
+    """Manually re-pull licenseConfigs and persist to quota_config."""
+    try:
+        return {"ok": True, **_fetch_and_persist_license_configs()}
+    except Exception as e:
+        log.error("seat refresh failed: %s", e)
+        raise HTTPException(500, f"seat refresh failed: {e}")
+
+
 @app.post("/api/refresh")
 def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
     """Re-materialize all snapshot tables. Returns per-table timing."""
@@ -522,7 +591,39 @@ def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
         except Exception as e:
             log.error("refresh failed: %s — %s", snap, e)
             results.append({"snapshot": snap, "ok": False, "error": str(e)[:200]})
-    return {"refreshed": results, "ok_count": sum(1 for r in results if r["ok"])}
+    # Also refresh live licenseConfigs so seat panel stays current.
+    seats: dict[str, Any]
+    try:
+        seats = {"ok": True, **_fetch_and_persist_license_configs()}
+    except Exception as e:
+        log.error("seat refresh failed inside /api/refresh: %s", e)
+        seats = {"ok": False, "error": str(e)[:200]}
+    return {"refreshed": results, "ok_count": sum(1 for r in results if r["ok"]), "seats": seats}
+
+
+# ============================================================
+# Background: auto-refresh licenseConfigs on startup + every N hours.
+# Snapshots are refreshed by BQ Scheduled Query; seats aren't (BQ SQL can't
+# call REST). This asyncio loop bridges the gap while the API process runs.
+# ============================================================
+@app.on_event("startup")
+async def _start_seat_refresh_loop() -> None:
+    if LICENSE_REFRESH_INTERVAL_SEC <= 0:
+        log.info("seat auto-refresh disabled (LICENSE_REFRESH_INTERVAL_SEC=0)")
+        return
+
+    async def _loop() -> None:
+        # Small initial delay so the process is fully ready before first hit
+        await asyncio.sleep(5)
+        while True:
+            try:
+                summary = await asyncio.to_thread(_fetch_and_persist_license_configs)
+                log.info("seat auto-refresh ok: %s", summary)
+            except Exception as e:
+                log.warning("seat auto-refresh failed: %s", e)
+            await asyncio.sleep(LICENSE_REFRESH_INTERVAL_SEC)
+
+    asyncio.create_task(_loop())
 
 
 # ============================================================

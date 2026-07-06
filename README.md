@@ -224,6 +224,24 @@ Cloud Run runs with `--no-allow-unauthenticated`. Only `roles/run.invoker` holde
 
 ---
 
+## Changelog
+
+Keep this list current when changing user-visible behavior, quota semantics, or dashboard data model. Newest first. See `git log` for full detail.
+
+- **2026-07-06** — NotebookLM quota count now includes only user-initiated write ops (`Create*`/`Update*`/`Delete*`/`BatchCreate*`/`Generate*`), excluding the ~20 background `Get*`/`List*`/`BatchGet*` calls the UI fires per notebook open. Per-user daily counts now match perceived actions. Also: seat count (`licenseConfigs` API) auto-refreshes every 24h from a FastAPI background task, tunable via `LICENSE_REFRESH_INTERVAL_SEC`; exposed via `POST /api/refresh/seats`.
+- **2026-07-06** — Quota Deep Dive: per-user table headers are click-sortable (email / tier / per-feature utilization).
+- **2026-07-03** — Playground findings: NotebookLM + Deep Research + image/video generation download APIs are gated by a workforce-identity check, not IAM; service accounts cannot pass regardless of role bundle. See `playground/de-api-probe/notebooklm-sa-gate.md` and `playground/ge-generation-probe/FINDINGS.md`.
+- **2026-07-03** — Compliance sweep: switched LICENSE MIT → Apache 2.0, applied license header to all 36 source files, replaced hardcoded actor-email prefix with the `SIM_PREFIX` env var (default `sim-`), scrubbed real project IDs / user emails / workforce hashes from `playground/`.
+- **2026-07-02** — Cover screenshots added to `README.md` and `README.zh-CN.md`.
+- **2026-06-30** — Snapshot Scheduled Query updated to also refresh 8 newly added `s_*` tables that were missing from the previous 15-view rotation.
+- **2026-06-29** — Quota page: seat count now sourced from live `v1alpha/licenseConfigs` (real 20-seat SEARCH_AND_ASSISTANT tier), replacing the static config value. Inline-editable tier limits and California-midnight reset semantics were already in place.
+- **2026-06-28** — Prompt reverse-lookup: attributes StreamAssist prompts to Deep Research (AsyncAssist ±60s) and custom agents (post-`page_type='agent'` navigation).
+- **2026-06-27** — Views transparently rename `vivo-sim-*` → `demo-*` at query time (source data untouched); later parameterized as `SIM_PREFIX`.
+- **2026-06-25** — NotebookLM audit-log capture: correct namespace is `notebooklm.v1main.*` (not `v1alpha` as public docs imply). Six services observed: Notebook, Source, Note, Artifact, AudioOverview, Account.
+- **2026-06-22** — Header time-range filter (24h / 7d / 30d / all).
+
+---
+
 ## License
 
-MIT — see [`LICENSE`](./LICENSE). Built by Claude Code (Opus). Contributions welcome.
+Apache 2.0 — see [`LICENSE`](./LICENSE). Built by Claude Code (Opus). Contributions welcome.
