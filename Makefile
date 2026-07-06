@@ -42,11 +42,18 @@ install: py-deps web-install
 	@echo "  3. make serve                              (local preview)"
 	@echo "     or: make deploy-infra                   (full GCP deploy)"
 
-# Python venv only (used by deploy chain; no node needed)
+# Python venv. Uses requirements-dev.txt (which -r's requirements.txt) so
+# pytest lands in the venv and `make install` → `pytest tests/unit/` works
+# without extra pip commands. Set PROD=1 to install only runtime deps.
 py-deps:
 	@if [ ! -x $(VENV)/bin/python3 ]; then \
 	  echo "→ creating venv + installing python deps"; \
-	  $(PY) -m venv $(VENV) && $(VENV)/bin/pip install -q -r apps/api/requirements.txt; \
+	  $(PY) -m venv $(VENV); \
+	  if [ "$(PROD)" = "1" ]; then \
+	    $(VENV)/bin/pip install -q -r apps/api/requirements.txt; \
+	  else \
+	    $(VENV)/bin/pip install -q -r apps/api/requirements-dev.txt; \
+	  fi; \
 	fi
 
 web-install:

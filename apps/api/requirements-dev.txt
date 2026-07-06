@@ -1,0 +1,5 @@
+# Dev-only Python deps (tests, linting). Installed by `make install` on top
+# of apps/api/requirements.txt so `pytest tests/unit/` works out of the box.
+-r requirements.txt
+
+pytest==9.1.1
