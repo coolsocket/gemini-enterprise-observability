@@ -337,6 +337,59 @@ belongs to another team):
 make deploy-infra PROJECT=<p> DATASET=ge_observability_v2 REGION=<r>
 ```
 
+**Preflight refused: "region mismatch, ALLOW_REGION_MISMATCH=y to bypass"**
+You passed a `REGION` (e.g. `asia-southeast1`) that doesn't match the
+dataset's `BQ_LOCATION` (e.g. `US` — the default). Most of the time this
+is a typo — you wanted everything in one region but only remembered one
+of the two variables. Preflight blocks by default because BQ dataset
+location is **immutable after create** and fixing it later means
+`tf-destroy` + rebuild + re-ingest.
+
+Fix — co-locate:
+```bash
+make deploy-infra PROJECT=<p> REGION=asia-southeast1 BQ_LOCATION=asia-southeast1
+```
+Actual data-residency intent (data in EU, compute in US, etc.)? Opt in:
+```bash
+ALLOW_REGION_MISMATCH=y make deploy-infra PROJECT=<p> …
+```
+
+**"I already deployed with mismatched regions. How do I rescue?"**
+The dataset location can't be changed in place. Two paths depending on
+how much data you've accumulated:
+
+*Case A — fresh deploy, little/no useful data (recommended for most)*:
+```bash
+# 1. Nuke everything so the mismatched dataset is gone
+cd terraform && terraform destroy \
+    -var project_id=<p> -var region=<old-region> \
+    -var bq_location=<old-loc> -var dataset_id=<d> -var container_image=…
+# (delete_contents_on_destroy = false will refuse — override for this rescue)
+# Or manually: bq rm -r -f <p>:<d>  &&  make tf-import-orphans + terraform state rm
+
+# 2. Redeploy everything in the right region
+make deploy-infra PROJECT=<p> REGION=asia-southeast1 BQ_LOCATION=asia-southeast1
+```
+
+*Case B — production dataset with weeks of logs to preserve*:
+```bash
+# 1. Snapshot the existing dataset to GCS
+bq extract --location=<old-loc> \
+  '<p>:<d>.cloudaudit_googleapis_com_data_access' \
+  gs://<backup-bucket>/data_access-*.avro
+# (repeat for each table you care about)
+
+# 2. Destroy + redeploy in new region (as Case A)
+
+# 3. Re-load from GCS into the new dataset
+bq load --location=<new-loc> --source_format=AVRO \
+  '<p>:<d>.cloudaudit_googleapis_com_data_access' \
+  gs://<backup-bucket>/data_access-*.avro
+```
+Practically, if you're moving *dashboard-only* usage, Case A is almost
+always fine — the dashboard shows near-real-time data anyway, and old
+audit rows aren't queried after a few weeks.
+
 **BigQuery data-residency: dataset in a specific region (e.g. Singapore)**
 Pass `BQ_LOCATION=asia-southeast1` (or `europe-west1`, `asia-east1`, etc.):
 ```bash

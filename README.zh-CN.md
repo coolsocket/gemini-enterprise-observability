@@ -284,6 +284,51 @@ CONFIRM=y make deploy-infra PROJECT=<p> REGION=<r>
 make deploy-infra PROJECT=<p> DATASET=ge_observability_v2 REGION=<r>
 ```
 
+**Preflight 拒绝: "region mismatch, ALLOW_REGION_MISMATCH=y to bypass"**
+你传的 `REGION` (比如 `asia-southeast1`) 跟 dataset 的 `BQ_LOCATION` (比如默认的 `US`) 不匹配。这**默认阻断**,因为大多数情况是你想统一 region 但只记住了一个变量。而且 BQ dataset location **建完不可改**,以后要修就得 `tf-destroy` + 重新灌数据。
+
+修 —— 统一 region:
+```bash
+make deploy-infra PROJECT=<p> REGION=asia-southeast1 BQ_LOCATION=asia-southeast1
+```
+真的要数据合规 (数据在欧洲、计算在美国等)? 显式绕过:
+```bash
+ALLOW_REGION_MISMATCH=y make deploy-infra PROJECT=<p> …
+```
+
+**"我已经用混合 region 部署过了,怎么救?"**
+Dataset location 原地改不了。两条路,看你累积多少有用数据:
+
+*情况 A —— 新部署,数据还不多 (大多数人应该走这条)*:
+```bash
+# 1. 全推倒重来
+cd terraform && terraform destroy \
+    -var project_id=<p> -var region=<老region> \
+    -var bq_location=<老location> -var dataset_id=<d> -var container_image=…
+# (delete_contents_on_destroy=false 会拒绝 —— 这次救援临时覆盖)
+# 或手动: bq rm -r -f <p>:<d>  &&  make tf-import-orphans + terraform state rm
+
+# 2. 用正确 region 重新部署
+make deploy-infra PROJECT=<p> REGION=asia-southeast1 BQ_LOCATION=asia-southeast1
+```
+
+*情况 B —— 生产 dataset 已经攒了几周日志要保留*:
+```bash
+# 1. 现有 dataset 导出到 GCS
+bq extract --location=<老location> \
+  '<p>:<d>.cloudaudit_googleapis_com_data_access' \
+  gs://<backup-bucket>/data_access-*.avro
+# (每张要保留的表都要跑一次)
+
+# 2. destroy + 用新 region 重建 (同情况 A)
+
+# 3. 从 GCS 灌回新 dataset
+bq load --location=<新location> --source_format=AVRO \
+  '<p>:<d>.cloudaudit_googleapis_com_data_access' \
+  gs://<backup-bucket>/data_access-*.avro
+```
+实操里, 如果只是 dashboard 用途, 情况 A 几乎总是可以 —— dashboard 展示的都是近实时数据, 老审计日志几周后基本不查了。
+
 **BigQuery 数据合规: dataset 放到特定 region (比如新加坡)**
 传 `BQ_LOCATION=asia-southeast1` (或 `europe-west1`, `asia-east1` 等):
 ```bash

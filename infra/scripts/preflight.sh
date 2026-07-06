@@ -49,6 +49,7 @@ fi
 # Bookkeeping
 existing_resources=()
 audit_would_change="no"
+region_mismatch="no"
 current_audit=""
 
 echo "${B}==> Pre-flight for ${PROJECT}${N}"
@@ -56,22 +57,45 @@ echo "    REGION=${REGION}  (Cloud Run + Artifact Registry)"
 echo "    BQ_LOCATION=${BQ_LOCATION}  (BigQuery dataset)"
 echo ""
 
-# Warn if REGION and BQ_LOCATION won't co-locate — often a mistake, since
-# data-residency or latency intent usually applies to both.
+# Detect REGION vs BQ_LOCATION mismatch. This blocks by default because most
+# people who typed one but not the other did NOT actually want cross-region
+# data — they usually want everything in the same physical location.
+# Data-residency intent (data in EU, compute in US, etc.) is legitimate but
+# rare; pass ALLOW_REGION_MISMATCH=y to opt in.
 case "${REGION}:${BQ_LOCATION}" in
-  us-*:US|us-*:us*) : ;;                     # us region + US multi-region: fine
-  eu-*:EU|eu-*:eu*|europe-*:EU|europe-*:eu*) : ;;  # eu + EU
-  asia-*:asia|asia-*:asia-*) : ;;                  # asia + asia multi-region
-  "${REGION}:${REGION}") : ;;                # exact match: fine
+  us-*:US|us-*:us*) : ;;                            # us region + US multi-region: fine
+  eu-*:EU|eu-*:eu*|europe-*:EU|europe-*:eu*) : ;;   # eu + EU
+  asia-*:asia|asia-*:asia-*) : ;;                   # asia + asia multi-region
+  "${REGION}:${REGION}") : ;;                       # exact match: fine
   *)
-    echo "${Y}⚠ REGION (${REGION}) and BQ_LOCATION (${BQ_LOCATION}) don't co-locate.${N}"
-    echo "    If you want everything in the same physical region, pass e.g.:"
+    region_mismatch="yes"
+    echo "${R}⚠ REGION (${REGION}) and BQ_LOCATION (${BQ_LOCATION}) don't co-locate.${N}"
+    echo ""
+    echo "    Why this matters:"
+    echo "      • Cloud Run in ${REGION} querying BQ in ${BQ_LOCATION} adds ~50-200ms"
+    echo "        per query and incurs cross-region egress cost (~\$0.02-0.08/GB)."
+    echo "      • Log sink still works (sinks are global), but every dashboard"
+    echo "        page load pulls data across regions."
+    echo "      • BQ dataset location is IMMUTABLE — fixing it later means"
+    echo "        tf-destroy + rebuild + re-ingest. Cheap to get right now."
+    echo ""
+    echo "    Recommended fix — co-locate everything:"
     echo "      make deploy-infra PROJECT=${PROJECT} REGION=${REGION} BQ_LOCATION=${REGION}"
-    echo "    If you WANT data in a different region than compute (data-residency"
-    echo "    intent), ignore this warning."
+    echo "    (or the reverse — set REGION=${BQ_LOCATION} instead.)"
+    echo ""
+    echo "    Data-residency intent (data must live in a specific region,"
+    echo "    different from compute)? Bypass this gate:"
+    echo "      ALLOW_REGION_MISMATCH=y make deploy-infra PROJECT=${PROJECT} …"
     echo ""
     ;;
 esac
+
+# Hard gate: fail unless the operator explicitly acknowledged.
+if [ "$region_mismatch" = "yes" ] && [ "${ALLOW_REGION_MISMATCH:-}" != "y" ]; then
+  echo "${R}✗ Refusing to continue with region mismatch (see above). Fix the${N}"
+  echo "${R}  REGION / BQ_LOCATION combination or set ALLOW_REGION_MISMATCH=y.${N}"
+  exit 3
+fi
 
 # --- 1. BQ dataset ---
 if bq --project_id="$PROJECT" ls -d 2>/dev/null | awk '{print $1}' | grep -Fxq "$DATASET"; then
