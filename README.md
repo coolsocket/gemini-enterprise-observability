@@ -311,31 +311,57 @@ ge-observability-service/
 
 ---
 
-## Documented data limitations
+## Known Limitations
 
-The dashboard surfaces every signal GE actually emits. These are the things it **can't** see, and why:
+Everything the dashboard surfaces is grounded in what GE actually emits. These are the things it **can't** see or do — grouped so you can find the relevant one fast.
 
-1. **Multimodal**: `streamAssist` doesn't accept `inlineData`. Image / file uploads use a separate session-file flow. The dashboard surfaces file activity as `session_files` counts, but you can't see *what* was uploaded.
+### Data — signals GE doesn't emit
 
-2. **trace_id linkage**: Only `v1alpha` (REST) chat calls produce paired `gen_ai.choice` logs. UI calls go through `v1main`, which writes `user_activity` but no `choice` — so prompts from the GE web app appear as `join_status='no_response'`. The Conversations page makes this visually obvious with a "✓ matched / prompt-only" filter.
+1. **Chat prompt ↔ response pairing.** Only `v1alpha` (REST) chat calls produce a paired `gen_ai.choice` log with a shared `trace_id`. UI calls flow through `v1main` — the prompt lands in `user_activity`, but no `choice` is written, so the prompt appears as `join_status='no_response'`. The Conversations page's "matched / prompt-only" filter makes this visible.
 
-3. **Deep Research (AsyncAssist)**: GE Deep Research uses `AssistantService.AsyncAssist` + `ReadAsyncAssist`. These calls appear in `cloudaudit_googleapis_com_data_access`, so the dashboard counts them per user/engine. **But the prompt + response text are NOT emitted** — same limitation as the UI path. To see actual research content, use the Deep Research task list in the GE admin console.
+2. **Deep Research prompt + response content.** Submissions are logged (`AssistantService.AsyncAssist`, one row per submit — counts are accurate) but the prompt text and response body are NOT emitted to Cloud Logging. To see actual content, use the Deep Research task list in the GE admin console.
 
-4. **NotebookLM Enterprise**: methods live under `google.cloud.notebooklm.v1main.*` (not `v1alpha` as the public docs imply — empirically `v1main` is what the UI emits). Six services observed: `NotebookService`, `SourceService`, `NoteService`, `ArtifactService`, `AudioOverviewService`, `AccountService`. All inside `serviceName="discoveryengine.googleapis.com"`. Bucketed into `notebooklm_{notebook,content,audio}_ops`. NotebookLM rows appear with `engine_id=NULL` because notebook resource names don't include `/engines/`.
+3. **Image / video / idea generation.** GE runs these inside Google infrastructure without customer audit logs. Removed from the Quota dashboard on 2026-07-06 — the previous prompt-keyword heuristic misclassified prompts like "summarize this video". `tier_limit` rows in `quota_config` are preserved for revival if GE ever exposes real per-feature counters.
 
-   ⚠ **Service accounts CANNOT use NotebookLM programmatically, even with full IAM roles.** Empirically confirmed (2026-07-03): granting `discoveryengine.notebooks.{list,create,get,update,delete}` to a service account results in a different, deeper 403 (`"The caller does not have permission"`, not the usual `"Permission X denied"`). The gate is at the NotebookLM service layer, not IAM — it requires the caller to have a valid Workforce Identity Federation subject registered in the Regional Access Boundary registry. Attempting IAM binding surfaces this as a `Regional Access Boundary HTTP request failed... Account not found for email: <hash>|<user>` warning (cosmetic — doesn't block the binding, but signals the underlying gate). SAs and Deep Research (AsyncAssist REST) share this limitation: they only respond to authenticated UI sessions. See `playground/de-api-probe/notebooklm-sa-gate.md` for full evidence.
+4. **Multimodal uploads.** `streamAssist` doesn't accept `inlineData`; files use a separate session-file flow. The dashboard shows `session_files` counts, not contents.
 
-5. **A2A agent invocation**: marketplace + custom agents invoked via A2A go through `assistants.agents.a2a.v1.{message,tasks}.*`. Bucketed as `a2a_invocations`. Per-agent breakdown not yet surfaced.
+5. **Built-in agents indistinguishable from chat.** Idea Generation, Co-Scientist, AlphaEvolve all flow through `AssistantService.StreamAssist`. The agent reference is in the request body — separating them would need DATA_WRITE audit logging with payload capture (off by default).
 
-6. **Other built-in agents (Idea Generation, Co-Scientist, AlphaEvolve)**: these flow through `AssistantService.StreamAssist` and are **not distinguishable from regular chat** at the method-name level. The agent reference is in the request body — would need DATA_WRITE audit logging with payload capture to break them out.
+6. **Custom agent invocation.** Opening the detail page emits `UserEventService.WriteUserEvent` with `agentinfo.{agentid,name}` (surfaced as nav events on the Agents page), but the actual invocation either goes through StreamAssist (lumped with chat) or A2A (in `a2a_invocations`).
 
-7. **Custom agent — view-only navigation**: when a user clicks a custom agent's detail page, we capture `agentinfo.{agentid, name}` via `UserEventService.WriteUserEvent`. That tells us *who opened which agent* but not whether they actually invoked it. Actual invocation either goes through StreamAssist (lumped with chat) or A2A (in `a2a_invocations`).
+7. **A2A per-agent breakdown.** A2A invocations are counted in aggregate as `a2a_invocations`, not per target agent yet.
 
-8. **Create events lack resource ID**: `CreateAgent`'s audit log has the parent resource (`assistants/default_assistant`), not the new agent's ID. So per-actor "alive resources" can't be attributed back to who created what. The Overview shows a system-wide alive count via direct `ListAgents` API.
+8. **CreateAgent lacks the new agent's resource ID.** The audit log has the parent resource (`assistants/default_assistant`), not the new agent's ID. So per-creator "alive resources" can't be attributed. The Overview page falls back to a system-wide alive count via direct `ListAgents` API.
 
-9. **PII in prompts**: `v_conversations` applies regex redaction for emails, phone numbers, ID-like numbers, and credit-card-like numbers. **Not a full DLP** — long-form PII (names, addresses) is not redacted. For production, layer Cloud DLP on top.
+### API — what a service account can't do
 
-10. **No public seat/license API**: "purchased seats" is a manual value in `quota_config`. "Claimed" is derived from distinct active actors in the last 30 days.
+9. **NotebookLM API is blocked for service accounts.** Even with a custom role granting all `discoveryengine.notebooks.*` permissions, SA calls return `403 "The caller does not have permission"`. The gate is at the NotebookLM service layer (workforce identity + Regional Access Boundary registry), not IAM. Attempting to bind the role surfaces this as a `Regional Access Boundary HTTP request failed... Account not found for email: <hash>|<user>` warning — cosmetic (the binding still succeeds) but signals the underlying gate. Full evidence: [`playground/de-api-probe/notebooklm-sa-gate.md`](./playground/de-api-probe/notebooklm-sa-gate.md).
+
+10. **Deep Research REST API is blocked for SAs.** `AsyncAssist` doesn't exist in the public `v1alpha` Discovery Engine schema — it's UI-internal (`v1main`) and gated by the same workforce-identity check. SAs cannot submit DR programmatically. Existing DR from real users IS observable via audit log; we just can't generate it from code.
+
+11. **Generated files can't be downloaded via API.** `StreamAssist` will happily produce an image (Nano Banana 2) or video and return a `fileId` in the stream response, but the download endpoints (`sessions/{sid}:listFiles`, `:getFile`, `:downloadFile`) all return `403 "Session is not owned by the provided user"` — same workforce gate. Files are only accessible in the GE UI. Full evidence: [`playground/ge-generation-probe/FINDINGS.md`](./playground/ge-generation-probe/FINDINGS.md).
+
+12. **Deep Research vs Search vs grounded-answer are distinct services.** DR = `AssistantService.AsyncAssist`, Search API = `SearchService.Search`, grounded-answer = `ConversationalSearchService.GetAnswer`. Our counters keep them in separate buckets; DR is never conflated with Search.
+
+### Deploy — manual steps outside our automation
+
+13. **GE engine must be pre-provisioned.** This repo observes an existing GE deployment; it doesn't create one. Provision the engine in GE Admin Console first.
+
+14. **GE Console toggles are manual.** Per engine, you must flip OpenTelemetry Instrumentation + Prompt & Response Logging (+ optional Feedback) in GE Admin Console. Without them no `gen_ai.*` logs flow and most views stay empty. See [`docs/GE_CONSOLE_SETUP.md`](./docs/GE_CONSOLE_SETUP.md).
+
+15. **Sink target tables are lazy.** `cloudaudit_googleapis_com_data_access` and `discoveryengine_googleapis_com_*` are auto-created by BigQuery only when the first matching sink row arrives. `make deploy-views` reports which are still waiting and is idempotent — re-run once traffic flows.
+
+16. **Cloud Run access needs manual IAP config.** Default `deploy_cloud_run = false`. Flipping it true creates the service, but you still need `iap_invokers = […]` in `terraform.tfvars` and (typically) Identity-Aware Proxy configuration for external access.
+
+### Operational — freshness + performance
+
+17. **Snapshot refresh cadence is 6h.** Dashboard pages read `s_*` snapshot tables refreshed by a BigQuery Scheduled Query every 6 hours. Manual refresh: `POST /api/refresh` (also exposed as a button on the Settings page). Live `v_*` views are always current but slower.
+
+18. **Seat count refresh is 24h.** `licenseConfigs` is pulled at API startup and every 24h by a background asyncio task. Manual refresh: `POST /api/refresh/seats`. Cloud Run cold starts trigger a fresh fetch; long-lived processes stay accurate for a day.
+
+19. **PII redaction is regex-only.** `v_conversations` redacts emails, phone numbers, ID-like numbers, and card-number-like sequences. **Not a full DLP** — names, addresses, and long-form PII pass through. For production, layer Cloud DLP on top.
+
+20. **`quota_config.default_tier` drives seat-to-tier attribution.** Total quota is computed as `sum over tiers of (seats_in_tier × per_tier_limit)`. Explicit user tier assignments (in `user_tier` table) are honored; unassigned seats fall back to `quota.default_tier` (default `plus`). Change the default in the Quota page's tier config editor.
 
 ---
 
@@ -364,6 +390,7 @@ Cloud Run runs with `--no-allow-unauthenticated`. Only `roles/run.invoker` holde
 
 Keep this list current when changing user-visible behavior, quota semantics, or dashboard data model. Newest first. See `git log` for full detail.
 
+- **2026-07-06** — Reorganized `Documented data limitations` → `Known Limitations` with 20 items grouped into four sections: Data (what GE doesn't emit), API (what SAs can't do), Deploy (manual steps outside automation), and Operational (freshness/PII/tier attribution). Refreshed all entries, dropped a stale "no seat API" item (we use `licenseConfigs` now), and pulled in the newer discoveries about SA-blocked file downloads and the Search-vs-DR distinction. Both EN + zh-CN.
 - **2026-07-06** — Two Deep Research consistency fixes: (a) `v_data_access_summary.deep_research_calls` used to count both `AsyncAssist` (submit) AND `ReadAsyncAssist` (UI polling) — inflating per-user counts 3-5×. Now aligned with `v_daily_usage_per_user` to count submits only; a user who ran two research tasks over two days now shows `4` on both the Quota page and User Deep Dive, not `4` and `12`. (b) Verified via full method-name audit: Deep Research (`AssistantService.AsyncAssist`), Google Search API (`SearchService.Search`), and grounded chat search (`ConversationalSearchService.GetAnswer`) are three distinct services that our counters keep in separate buckets — Deep Research is never conflated with Search.
 - **2026-07-06** — README Prerequisites now includes a full end-to-end verification checklist (~14 items) so first-time deployers know exactly when to declare victory, including the manual GE Console toggle step and the "wait for logs then re-run views" loop. Both EN + zh-CN.
 - **2026-07-06** — Deploy pipeline fixes for first-time deployers (simulated from scratch, hit 3 blockers): (a) `apply_views.py` now categorizes missing-source-table errors as "waiting for log-sink tables" (idempotent, safe to re-run once logs flow) vs "missing Terraform-managed table" (actionable: run `tf-apply`) vs "real errors". (b) `bootstrap.py` migrated from `subprocess("gcloud auth print-access-token")` to `google.auth.default()` — no gcloud CLI needed in containers/CI. (c) Container image moved from deprecated `gcr.io/` to Artifact Registry (`<region>-docker.pkg.dev/...`); Terraform now provisions a `google_artifact_registry_repository`. (d) `make deploy` split into two-phase `deploy-infra` + `deploy-views` reflecting the fact that BQ sink target tables only exist after GE toggles ON + traffic flows. (e) `deploy_cloud_run` default flipped to `false` so first-time deployers can iterate locally. (f) README got a full Prerequisites section + Troubleshooting covering the 5 common failure modes.
