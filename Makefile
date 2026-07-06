@@ -1,5 +1,5 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
-        tf-init tf-plan tf-apply tf-import-orphans views bootstrap image \
+        tf-init tf-plan tf-apply tf-import-orphans preflight views bootstrap image \
         deploy-infra deploy-views deploy all clean
 
 PY ?= python3
@@ -54,6 +54,14 @@ PROJECT ?=
 REGION ?= us-central1
 DATASET ?= ge_observability
 
+# BigQuery dataset location — separate from REGION (which is for Cloud Run +
+# Artifact Registry). Default is the US multi-region for maximum availability.
+# Common single-regions: `asia-southeast1` (Singapore), `asia-east1` (Taiwan),
+# `europe-west1` (Belgium), `us-central1`. Data-residency laws usually want
+# a single region; free-tier work can stay on the `US` multi-region.
+# Cannot be changed after the dataset is created — pick once, live with it.
+BQ_LOCATION ?= US
+
 # Artifact Registry (not the deprecated gcr.io). Repository is created by
 # terraform (google_artifact_registry_repository.dashboard). Image tag format:
 # <region>-docker.pkg.dev/<project>/<repo>/dashboard:latest
@@ -68,14 +76,24 @@ tf-init: check-project
 	cd terraform && terraform init
 tf-plan: tf-init
 	cd terraform && terraform plan -var "project_id=$(PROJECT)" -var "region=$(REGION)" \
-	  -var "dataset_id=$(DATASET)" -var "container_image=$(IMAGE)" -var "ar_repo=$(AR_REPO)"
+	  -var "dataset_id=$(DATASET)" -var "bq_location=$(BQ_LOCATION)" \
+	  -var "container_image=$(IMAGE)" -var "ar_repo=$(AR_REPO)"
 
 # Step 2: terraform apply (creates dataset, sink, audit-config, SA, IAM,
 # Artifact Registry repo, and optionally Cloud Run)
 tf-apply: tf-init
 	cd terraform && terraform apply -auto-approve \
 	  -var "project_id=$(PROJECT)" -var "region=$(REGION)" \
-	  -var "dataset_id=$(DATASET)" -var "container_image=$(IMAGE)" -var "ar_repo=$(AR_REPO)"
+	  -var "dataset_id=$(DATASET)" -var "bq_location=$(BQ_LOCATION)" \
+	  -var "container_image=$(IMAGE)" -var "ar_repo=$(AR_REPO)"
+
+# Preflight: reports what's already in the target project (dataset, SA, sink,
+# AR repo, audit config for discoveryengine) so the operator knows whether
+# they'll get 409s or whether the audit-config change will overwrite existing
+# exemptions. Interactive by default; set CONFIRM=y to auto-accept in scripts.
+preflight: check-project
+	PROJECT=$(PROJECT) DATASET=$(DATASET) REGION=$(REGION) AR_REPO=$(AR_REPO) \
+	  bash infra/scripts/preflight.sh
 
 # Recover from a partial/failed first `tf-apply` where resources leaked into
 # GCP but never made it into terraform state, causing all subsequent applies
@@ -102,7 +120,7 @@ bootstrap: check-project py-deps
 
 # ---------- Two-phase deploy (recommended for fresh projects) ----------
 # Phase A: everything that can succeed before GE has emitted any logs.
-deploy-infra: py-deps tf-apply image bootstrap
+deploy-infra: py-deps preflight tf-apply image bootstrap
 	@echo ""
 	@echo "✓ Phase A done. Infrastructure + image + metadata ready."
 	@echo ""

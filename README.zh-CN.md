@@ -168,10 +168,12 @@ make deploy-infra PROJECT=my-project REGION=us-central1
 # `REGION` 控制什么 (默认 us-central1):
 #   • Artifact Registry 仓库位置 (镜像存哪)
 #   • Cloud Run 服务位置 (如果 deploy_cloud_run=true, dashboard 跑在哪)
-# 它**不控制** BigQuery dataset 位置 —— 那是 terraform/variables.tf 里的
-# `bq_location` (默认 `US` multi-region)。Log Router sink 是 global。
-# 选离用户近的 region;之后要改需要 tf-destroy + 重 apply,因为 Cloud Run
-# 和 Artifact Registry 都是区域性资源。
+# `BQ_LOCATION` 控制什么 (默认 US, 独立变量):
+#   • BigQuery dataset 位置 —— 新加坡设 asia-southeast1、比利时设
+#     europe-west1、或者 US / EU / asia 这种 multi-region。
+#     数据合规常见选: BQ_LOCATION=asia-southeast1 把分析数据留在新加坡。
+# Log Router sink 是 global。REGION 和 BQ_LOCATION 都是一锤子买卖,原地
+# 改不了 —— 要迁 region 就 tf-destroy + 重 apply。
 
 # ---------- 手工步骤 ----------
 # GE Admin 控制台每个 engine 打开:
@@ -238,6 +240,28 @@ make tf-apply          PROJECT=<你的项目> REGION=<region>
 ```
 
 `tf-import-orphans` 对每个可能泄漏的资源都跑 `terraform import` (dataset + 6 张 metadata 表、service account、log sink、Artifact Registry repo、audit config、已启用的 API,还有 Cloud Run 如果开了)。**幂等** —— "已在 state 里"和"不存在"都当 no-op,可以随便重跑。
+
+**`make deploy-infra` 停在 "Continue anyway?" 或提示 audit-config 警告**
+是 `make preflight` 在做它的活儿 —— 在 `terraform apply` 之前先扫一遍报告:
+  1. `ge_observability` dataset / SA / sink / AR repo 里哪些已经存在 (需要 `tf-import-orphans` 或换个 `DATASET=` 名字)。
+  2. 权威型的 `discoveryengine.googleapis.com` audit config 会不会被改 (它是唯一会覆盖的资源 —— 会清掉你原有的 `exempted_members`)。
+
+脚本 / CI 里跳过交互式确认:
+```bash
+CONFIRM=y make deploy-infra PROJECT=<p> REGION=<r>
+```
+
+用不同的 dataset 名字 (推荐 —— 如果 `ge_observability` 是别的团队在用):
+```bash
+make deploy-infra PROJECT=<p> DATASET=ge_observability_v2 REGION=<r>
+```
+
+**BigQuery 数据合规: dataset 放到特定 region (比如新加坡)**
+传 `BQ_LOCATION=asia-southeast1` (或 `europe-west1`, `asia-east1` 等):
+```bash
+make deploy-infra PROJECT=<p> REGION=asia-southeast1 BQ_LOCATION=asia-southeast1
+```
+`REGION` (Cloud Run + Artifact Registry) 和 `BQ_LOCATION` (BQ dataset) 是**独立的** —— 你可以把 dashboard 放 `us-central1`,但分析数据留在新加坡。dataset location 建完不可改;要迁需要 `tf-destroy` + 重 apply (数据保留因为 `delete_contents_on_destroy = false`,但要重新灌进新 dataset)。
 
 **Cloud Run URL 返回 403**
 把调用方加到 `terraform.tfvars` 的 `iap_invokers` 里再 apply。没走 IAP 用 `roles/run.invoker`,走了 IAP 用 `principal://` 格式。还是 403 就看看 Cloud Run 是否要求 auth。

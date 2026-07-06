@@ -192,10 +192,13 @@ make deploy-infra PROJECT=my-project REGION=us-central1
 #   • Artifact Registry repo location (where the container image lives)
 #   • Cloud Run service location (where the dashboard runs, if you flip
 #     deploy_cloud_run=true)
-# It does NOT control the BigQuery dataset location — that's `bq_location`
-# in terraform/variables.tf (defaults to `US` multi-region). Log Router sinks
-# are global. Pick a region close to your users; changing it later requires
-# tf-destroy + re-apply because Cloud Run and AR are regional resources.
+# What `BQ_LOCATION` controls (default US, separate variable):
+#   • BigQuery dataset location — pick asia-southeast1 for Singapore,
+#     europe-west1 for Belgium, or a multi-region like US / EU / asia.
+#     Common data-residency choice: BQ_LOCATION=asia-southeast1 to keep
+#     analytical data in Singapore.
+# Log Router sinks are global. Both REGION and BQ_LOCATION are picked once
+# and can't be changed in place — tf-destroy + re-apply if you need to move.
 
 # ---------- Manual step ----------
 # In GE Admin Console, per engine, enable:
@@ -283,6 +286,38 @@ have leaked (dataset + 6 metadata tables, service account, log sink,
 Artifact Registry repo, audit config, enabled APIs, and Cloud Run if
 enabled). It's idempotent — "already in state" and "doesn't exist" are
 both silent no-ops, so it's safe to re-run.
+
+**`make deploy-infra` stops at "Continue anyway?" or shows an audit-config warning**
+That's `make preflight` doing its job — it runs before `terraform apply`
+and reports:
+  1. Which of `ge_observability` dataset / SA / sink / AR repo already exist
+     (needing `tf-import-orphans` OR a different `DATASET=` name).
+  2. Whether the authoritative `discoveryengine.googleapis.com` audit config
+     will be modified (it's the one resource that overwrites — will strip
+     any `exempted_members` you had set).
+
+For a script or CI run, skip the interactive prompt with:
+```bash
+CONFIRM=y make deploy-infra PROJECT=<p> REGION=<r>
+```
+
+To pick a different dataset name (recommended if `ge_observability`
+belongs to another team):
+```bash
+make deploy-infra PROJECT=<p> DATASET=ge_observability_v2 REGION=<r>
+```
+
+**BigQuery data-residency: dataset in a specific region (e.g. Singapore)**
+Pass `BQ_LOCATION=asia-southeast1` (or `europe-west1`, `asia-east1`, etc.):
+```bash
+make deploy-infra PROJECT=<p> REGION=asia-southeast1 BQ_LOCATION=asia-southeast1
+```
+`REGION` (Cloud Run + Artifact Registry) and `BQ_LOCATION` (BQ dataset) are
+independent — you can put the dashboard in `us-central1` while keeping
+analytical data in Singapore. Dataset location is immutable after create;
+change requires `tf-destroy` + fresh apply (data is preserved because
+`delete_contents_on_destroy = false`, but you'd need to re-ingest to the
+new dataset).
 
 **Cloud Run URL returns 403**
 Add your callers to `iap_invokers` in `terraform.tfvars` and re-apply.
