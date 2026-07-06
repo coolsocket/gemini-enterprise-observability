@@ -1,5 +1,5 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
-        tf-init tf-plan tf-apply views bootstrap image \
+        tf-init tf-plan tf-apply tf-import-orphans views bootstrap image \
         deploy-infra deploy-views deploy all clean
 
 PY ?= python3
@@ -76,6 +76,13 @@ tf-apply: tf-init
 	cd terraform && terraform apply -auto-approve \
 	  -var "project_id=$(PROJECT)" -var "region=$(REGION)" \
 	  -var "dataset_id=$(DATASET)" -var "container_image=$(IMAGE)" -var "ar_repo=$(AR_REPO)"
+
+# Recover from a partial/failed first `tf-apply` where resources leaked into
+# GCP but never made it into terraform state, causing all subsequent applies
+# to fail with `Error 409: Already Exists`. Idempotent — safe to re-run.
+tf-import-orphans: check-project tf-init
+	PROJECT=$(PROJECT) DATASET=$(DATASET) REGION=$(REGION) AR_REPO=$(AR_REPO) \
+	  bash infra/scripts/import_orphans.sh
 
 # Step 3: build container image and push to Artifact Registry
 image: check-project

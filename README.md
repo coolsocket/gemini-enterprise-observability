@@ -267,6 +267,23 @@ Registry — check that you're on a recent `main` and that the `IMAGE`
 variable resolves to `<region>-docker.pkg.dev/...`. Run `make tf-apply`
 first so Terraform creates the AR repo before `make image`.
 
+**`terraform apply` fails with `Error 409: Already Exists` on the second run**
+Your first `tf-apply` was interrupted (permission denied, quota, network
+blip, Ctrl-C) after some resources had already been created in GCP but
+before Terraform wrote them to state. The retry then tries to re-create
+them and hits the 409. Recover with:
+
+```bash
+make tf-import-orphans PROJECT=<your-project> REGION=<region>
+make tf-apply         PROJECT=<your-project> REGION=<region>
+```
+
+`tf-import-orphans` runs `terraform import` for every resource that might
+have leaked (dataset + 6 metadata tables, service account, log sink,
+Artifact Registry repo, audit config, enabled APIs, and Cloud Run if
+enabled). It's idempotent — "already in state" and "doesn't exist" are
+both silent no-ops, so it's safe to re-run.
+
 **Cloud Run URL returns 403**
 Add your callers to `iap_invokers` in `terraform.tfvars` and re-apply.
 Without IAP: use `roles/run.invoker` on the specific principals. With IAP:

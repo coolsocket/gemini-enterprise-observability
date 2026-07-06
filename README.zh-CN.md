@@ -229,6 +229,16 @@ make views     PROJECT=my-project    # apply BQ view (重跑直到全部通过)
 **`gcloud builds submit` 在 `gcr.io/...` 报 `NOT_FOUND`**
 `gcr.io` (Container Registry) 2024 年 2 月被 Google 废弃,之后建的 project 都没有。本仓库已经迁到 Artifact Registry —— 确保你在最新 `main` 上,`IMAGE` 变量解析出 `<region>-docker.pkg.dev/...`。先跑 `make tf-apply` 让 Terraform 建 AR repo,再跑 `make image`。
 
+**第二次 `terraform apply` 报 `Error 409: Already Exists`**
+第一次 `tf-apply` 被中断了 (权限、quota、网络抖动、Ctrl-C),部分资源已经在 GCP 里创建但还没写进 terraform state。第二次 apply 想重新建 → 409。恢复:
+
+```bash
+make tf-import-orphans PROJECT=<你的项目> REGION=<region>
+make tf-apply          PROJECT=<你的项目> REGION=<region>
+```
+
+`tf-import-orphans` 对每个可能泄漏的资源都跑 `terraform import` (dataset + 6 张 metadata 表、service account、log sink、Artifact Registry repo、audit config、已启用的 API,还有 Cloud Run 如果开了)。**幂等** —— "已在 state 里"和"不存在"都当 no-op,可以随便重跑。
+
 **Cloud Run URL 返回 403**
 把调用方加到 `terraform.tfvars` 的 `iap_invokers` 里再 apply。没走 IAP 用 `roles/run.invoker`,走了 IAP 用 `principal://` 格式。还是 403 就看看 Cloud Run 是否要求 auth。
 
