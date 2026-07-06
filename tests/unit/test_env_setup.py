@@ -51,6 +51,27 @@ def test_env_example_exists_with_required_keys() -> None:
         assert f"{key}=" in text, f".env.example missing required key: {key}"
 
 
+def test_env_example_does_not_hardcode_bq_project() -> None:
+    """BQ_PROJECT MUST be commented out in .env.example.
+    Otherwise `make wizard`'s empty-check gets defeated: user runs wizard,
+    presses Enter to accept the "default" (which is the placeholder from
+    the template), and ends up with .env containing BQ_PROJECT=my-project
+    — a broken deploy that fails at first BQ call."""
+    text = ENV_EXAMPLE.read_text()
+    import re
+    bad = [
+        (i, ln) for i, ln in enumerate(text.splitlines(), start=1)
+        if re.match(r"^\s*BQ_PROJECT\s*=", ln)
+    ]
+    assert not bad, (
+        ".env.example ships an uncommented BQ_PROJECT default:\n"
+        + "\n".join(f"  line {ln_no}: {ln}" for ln_no, ln in bad)
+        + "\nComment it out. wizard.sh will refuse an empty BQ_PROJECT — "
+        "that's the correct fail-early behavior. A placeholder default here "
+        "silently passes and produces a broken .env."
+    )
+
+
 def test_gitignore_excludes_env() -> None:
     """.env holds the operator's real project id and possibly a path to a
     service-account key — must not be committed."""
