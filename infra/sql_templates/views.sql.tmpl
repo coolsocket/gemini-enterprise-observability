@@ -25,7 +25,13 @@ CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_admin_activity` AS
 WITH base AS (
   SELECT
     timestamp,
-    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
+    REGEXP_REPLACE(
+      COALESCE(
+        protopayload_auditlog.authenticationInfo.principalEmail,
+        REGEXP_EXTRACT(protopayload_auditlog.authenticationInfo.principalSubject, r'subject/([^/]+)$')
+      ),
+      r'^{{SIM_PREFIX}}', 'demo-'
+    ) AS actor_email,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+)$') AS action,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+Service)\.') AS service,
     REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/([a-zA-Z]+)/[^/]+$') AS resource_type,
@@ -90,7 +96,13 @@ CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_data_access` AS
 WITH base AS (
   SELECT
     timestamp,
-    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
+    REGEXP_REPLACE(
+      COALESCE(
+        protopayload_auditlog.authenticationInfo.principalEmail,
+        REGEXP_EXTRACT(protopayload_auditlog.authenticationInfo.principalSubject, r'subject/([^/]+)$')
+      ),
+      r'^{{SIM_PREFIX}}', 'demo-'
+    ) AS actor_email,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+)$') AS action,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+Service)\.') AS service,
     REGEXP_EXTRACT(protopayload_auditlog.resourceName, r'/engines/([^/]+)') AS engine_id_raw,
@@ -691,7 +703,13 @@ CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_deep_research_prompts` AS
 WITH dr_events AS (
   SELECT
     timestamp AS dr_ts,
-    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
+    REGEXP_REPLACE(
+      COALESCE(
+        protopayload_auditlog.authenticationInfo.principalEmail,
+        REGEXP_EXTRACT(protopayload_auditlog.authenticationInfo.principalSubject, r'subject/([^/]+)$')
+      ),
+      r'^{{SIM_PREFIX}}', 'demo-'
+    ) AS actor_email,
     REGEXP_EXTRACT(protopayload_auditlog.methodName, r'\.([^.]+)$') AS dr_action
   FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_data_access`
   WHERE protopayload_auditlog.methodName LIKE '%AssistantService.AsyncAssist'
@@ -856,19 +874,37 @@ CREATE OR REPLACE VIEW `{{PROJECT}}.{{DATASET}}.v_daily_usage_per_user` AS
 WITH audit AS (
   SELECT
     DATE(timestamp, 'America/Los_Angeles') AS d,
-    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
+    REGEXP_REPLACE(
+      COALESCE(
+        protopayload_auditlog.authenticationInfo.principalEmail,
+        REGEXP_EXTRACT(protopayload_auditlog.authenticationInfo.principalSubject, r'subject/([^/]+)$')
+      ),
+      r'^{{SIM_PREFIX}}', 'demo-'
+    ) AS actor_email,
     protopayload_auditlog.methodName AS method,
     protopayload_auditlog.serviceName AS service
   FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_data_access`
-  WHERE protopayload_auditlog.authenticationInfo.principalEmail IS NOT NULL
+  WHERE COALESCE(
+    protopayload_auditlog.authenticationInfo.principalEmail,
+    REGEXP_EXTRACT(protopayload_auditlog.authenticationInfo.principalSubject, r'subject/([^/]+)$')
+  ) IS NOT NULL
 ),
 admin AS (
   SELECT
     DATE(timestamp, 'America/Los_Angeles') AS d,
-    REGEXP_REPLACE(protopayload_auditlog.authenticationInfo.principalEmail, r'^{{SIM_PREFIX}}', 'demo-') AS actor_email,
+    REGEXP_REPLACE(
+      COALESCE(
+        protopayload_auditlog.authenticationInfo.principalEmail,
+        REGEXP_EXTRACT(protopayload_auditlog.authenticationInfo.principalSubject, r'subject/([^/]+)$')
+      ),
+      r'^{{SIM_PREFIX}}', 'demo-'
+    ) AS actor_email,
     protopayload_auditlog.methodName AS method
   FROM `{{PROJECT}}.{{DATASET}}.cloudaudit_googleapis_com_activity`
-  WHERE protopayload_auditlog.authenticationInfo.principalEmail IS NOT NULL
+  WHERE COALESCE(
+    protopayload_auditlog.authenticationInfo.principalEmail,
+    REGEXP_EXTRACT(protopayload_auditlog.authenticationInfo.principalSubject, r'subject/([^/]+)$')
+  ) IS NOT NULL
 ),
 combined AS (
   -- chat: StreamAssist

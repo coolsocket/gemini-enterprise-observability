@@ -51,6 +51,43 @@ table directly — there is no `v_*` for the un-aggregated stream.
 - **Code:** `apps/api/routes/observability.py::user_deep_dive`
 - **Test:** `tests/unit/test_user_deep_dive_live_flag.py`
 
+## INV-obs-005: audit views MUST resolve principal via COALESCE
+
+Every view that reads `protopayload_auditlog.authenticationInfo.
+principalEmail` in a projection MUST COALESCE it with subject-extraction
+from `principalSubject`:
+
+```sql
+COALESCE(
+  protopayload_auditlog.authenticationInfo.principalEmail,
+  REGEXP_EXTRACT(
+    protopayload_auditlog.authenticationInfo.principalSubject,
+    r'subject/([^/]+)$'
+  )
+)
+```
+
+**Violation shape**: on a tenant that authenticates users via OIDC or
+Workforce Identity Federation, `principalEmail` is NULL for real users.
+Only `principalSubject` carries the identity, in the shape
+`principal://iam.googleapis.com/locations/global/workforcePools/POOL_ID/subject/SUBJ_ID`.
+Verified on responsive-lens-421108 (2026-07-07): 997/1000 audit rows
+had NULL principalEmail; extracting `subject/([^/]+)$` recovered 73
+distinct actors and 40+ users in v_data_access_summary that were
+previously invisible.
+
+The extracted subject ID matches the numeric OIDC principal already
+used in `user_activity.jsonPayload.useriamprincipal` — so JOINs across
+Path 2 (user_activity) and Path 3 (audit) unify to the same actor.
+
+Every `WHERE …principalEmail IS NOT NULL` MUST also use the COALESCEd
+expression, otherwise OIDC rows get filtered out AFTER the SELECT
+recovers them.
+
+- **Code:** `infra/sql_templates/views.sql.tmpl` — every audit-log view
+  (v_admin_activity, v_data_access, v_deep_research_prompts)
+- **Test:** `tests/unit/test_audit_principal_subject_coalesce.py`
+
 ## INV-obs-004: lifespan is the startup hook
 
 App startup work MUST be wired through FastAPI's lifespan context
