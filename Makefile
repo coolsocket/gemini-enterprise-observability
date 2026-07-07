@@ -98,10 +98,35 @@ clean:
 
 # ============================================================
 # Deployment to a fresh GCP project
-# Required: PROJECT=<id>  REGION=<region>
+# Required: PROJECT=<id>  REGION=<region>  (BQ_PROJECT accepted as alias)
 # Optional: DATASET=<name>  IMAGE=<full-image-tag>  AR_REPO=<name>
 # ============================================================
+
+# Resolve PROJECT with a self-adapting fallback chain — accept whatever the
+# operator has already configured, don't demand they retype it:
+#   1. PROJECT explicitly set (CLI or .env)  → use as-is
+#   2. BQ_PROJECT set (wizard.sh writes this, .env.example documents it,
+#      app reads this at runtime — natural to only fill this in)
+#      → mirror to PROJECT
+#   3. `gcloud config get-value project` → use active gcloud project
+#   4. still empty → check-project fails with hint pointing at `make wizard`
+# All resolution at Makefile-variable level (not just recipe shell) so the
+# `serve` recipe's `BQ_PROJECT=$(PROJECT)` substitution actually gets a value.
 PROJECT ?=
+# Snapshot the operator's ORIGINAL setting before any fallback kicks in, so
+# check-project can report where PROJECT actually came from without wrongly
+# labeling an explicit setting as a gcloud fallback.
+PROJECT_EXPLICIT := $(PROJECT)
+BQ_PROJECT_EXPLICIT := $(BQ_PROJECT)
+
+ifeq ($(strip $(PROJECT)),)
+  ifneq ($(strip $(BQ_PROJECT)),)
+    PROJECT := $(BQ_PROJECT)
+  else
+    PROJECT := $(shell gcloud config get-value project 2>/dev/null)
+  endif
+endif
+
 REGION ?= us-central1
 DATASET ?= ge_observability
 
@@ -124,7 +149,35 @@ AR_REPO ?= ge-observability
 IMAGE ?= $(REGION)-docker.pkg.dev/$(PROJECT)/$(AR_REPO)/dashboard:latest
 
 check-project:
-	@if [ -z "$(PROJECT)" ]; then echo "ERROR: PROJECT=<gcp-project-id> required"; exit 1; fi
+	@# See the PROJECT resolution comment above — by the time we get here,
+	@# PROJECT is populated from PROJECT / BQ_PROJECT / `gcloud config get-value
+	@# project` in that order. If it's STILL empty, none of those three
+	@# signals exist and the operator needs pointed guidance, not a
+	@# cryptic `PROJECT=<id> required`.
+	@if [ -z "$(PROJECT)" ]; then \
+	  echo ""; \
+	  echo "ERROR: no GCP project set. Tried in order:"; \
+	  echo "  1. \$$PROJECT (Make var / CLI / .env)              → empty"; \
+	  echo "  2. \$$BQ_PROJECT (natural env var)                  → empty"; \
+	  echo "  3. gcloud config get-value project                → empty"; \
+	  echo ""; \
+	  echo "Fix (pick one):"; \
+	  echo "  • make wizard                                    # one-shot .env setup"; \
+	  echo "  • gcloud config set project <YOUR_PROJECT_ID>    # gcloud picks it up"; \
+	  echo "  • make serve BQ_PROJECT=<YOUR_PROJECT_ID>        # one-off override"; \
+	  echo ""; \
+	  exit 1; \
+	fi
+	@# Tell the operator where the project ID came from — helpful when they
+	@# didn't set it explicitly and the fallback found something. Silent when
+	@# PROJECT was explicit (they already know).
+	@if [ -n "$(PROJECT_EXPLICIT)" ]; then \
+	  : ; \
+	elif [ -n "$(BQ_PROJECT_EXPLICIT)" ]; then \
+	  echo "→ project: $(PROJECT) (from BQ_PROJECT)"; \
+	else \
+	  echo "→ project: $(PROJECT) (from gcloud config get-value project)"; \
+	fi
 
 # Step 1: terraform plan (preview)
 tf-init: check-project

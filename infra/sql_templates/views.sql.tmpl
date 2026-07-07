@@ -45,9 +45,10 @@ SELECT
     WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN b.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(b.actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     WHEN b.actor_email IS NULL OR b.actor_email = '' THEN 'UNKNOWN'
-    ELSE 'HUMAN'
+    ELSE 'UNKNOWN'
   END AS origin,
   em.display_name AS engine_display_name
 FROM base b
@@ -64,6 +65,7 @@ SELECT
     WHEN actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN actor_email LIKE '%@%' AND actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -106,9 +108,10 @@ SELECT
     WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN b.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(b.actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     WHEN b.actor_email IS NULL OR b.actor_email = '' THEN 'UNKNOWN'
-    ELSE 'HUMAN'
+    ELSE 'UNKNOWN'
   END AS origin,
   em.display_name AS engine_display_name
 FROM base b
@@ -125,6 +128,7 @@ SELECT
     WHEN actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN actor_email LIKE '%@%' AND actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -252,6 +256,7 @@ SELECT
     WHEN r.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN r.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN r.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(r.actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN r.actor_email LIKE '%@%' AND r.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -362,6 +367,7 @@ SELECT
     WHEN ua.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN ua.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN ua.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(ua.actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN ua.actor_email LIKE '%@%' AND ua.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -411,6 +417,7 @@ SELECT
     WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN a.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(a.actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -523,6 +530,7 @@ SELECT
     WHEN b.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN b.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN b.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(b.actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN b.actor_email LIKE '%@%' AND b.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -550,6 +558,7 @@ SELECT
     WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-'), r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') LIKE '%@%' AND REGEXP_REPLACE(jsonPayload.useriamprincipal, r'^{{SIM_PREFIX}}', 'demo-') NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -740,6 +749,7 @@ SELECT
     WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN a.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(a.actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
@@ -821,6 +831,7 @@ SELECT
     WHEN a.actor_email LIKE '{{SIM_PATTERN}}' THEN 'SIMULATED'
     WHEN a.actor_email LIKE '%gserviceaccount.com' THEN 'AUTOMATION'
     WHEN a.actor_email LIKE 'principal://%' THEN 'HUMAN'  -- OIDC / Workforce Identity Federation user
+    WHEN REGEXP_CONTAINS(a.actor_email, r'^[0-9]+$') THEN 'HUMAN'  -- OIDC subject ID (numeric, no @ / no principal:// prefix)
     WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
