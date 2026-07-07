@@ -51,6 +51,34 @@ table directly — there is no `v_*` for the un-aggregated stream.
 - **Code:** `apps/api/routes/observability.py::user_deep_dive`
 - **Test:** `tests/unit/test_user_deep_dive_live_flag.py`
 
+## INV-obs-007: identity resolution is single-sourced
+
+`apps/api/contexts/observability/domain/identity.py::IdentityResolver`
+is the ONE place where `(principalEmail, principalSubject)` →
+`Identity` classification lives. Adding a new IdP (Okta, Microsoft,
+Ping, …) is exactly:
+
+  1. Add a value to `IdentityKind` enum.
+  2. Add a `ResolverRule` before the generic rules in `DEFAULT_RULES`.
+  3. Add a parametrize fixture in `test_identity_resolver.py`.
+  4. If the new IdP surfaces a new pool-name pattern, use that as the
+     predicate (see `_is_wif_okta` / `_is_wif_azure` for the pattern).
+
+**Contract**: `Identity.actor_id` MUST be the same string across
+Path 2 (user_activity.useriamprincipal) and Path 3 (audit.
+principalSubject) for the same person. This is what makes
+`v_user_usage ↔ v_data_access` JOINs unify chat activity per user.
+
+SQL views retain their COALESCE + REGEXP_EXTRACT fallback (see
+INV-obs-005) because BQ Scheduled Queries run without Python
+mediation — the two layers must AGREE on the extracted actor_id
+form. Any future rule change that shifts actor_id extraction (e.g.
+switching from `subject/([^/]+)$` to hashed IDs) MUST update both
+the Python resolver AND the SQL COALESCE together.
+
+- **Code:** `apps/api/contexts/observability/domain/identity.py`
+- **Test:** `tests/unit/test_identity_resolver.py` (20+ fixtures)
+
 ## INV-obs-006: v_user_persona chat MUST fall back to Path 3 audit
 
 Tenants without "Prompt & Response Logging" enabled in GE Admin

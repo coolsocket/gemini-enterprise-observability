@@ -280,6 +280,16 @@ def list_users(since_hours: Optional[int] = None) -> dict[str, Any]:
     ORDER BY b.total_data_access DESC
     """
     rows = [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+    # Attach identity_kind from single-source-of-truth resolver so the
+    # frontend can badge Google-email / OIDC-subject / SA / simulated
+    # without duplicating string checks. Vendor detail (Okta / Azure)
+    # requires the raw principalSubject; that surfaces on the detail
+    # endpoint below where we have room for a per-user raw lookup.
+    from apps.api.contexts.observability.domain.identity import resolve as resolve_identity
+    for row in rows:
+        ident = resolve_identity(row.get("actor_email"), None)
+        row["identity_kind"] = ident.kind.value
+        row["is_human"] = ident.is_human
     return {"users": rows, "count": len(rows)}
 
 
@@ -341,7 +351,55 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as pool:
         results = dict(pool.map(run_one, queries.items()))
 
-    payload = {"actor_email": email, "source": "live_view" if live else "snapshot", **results}
+    # Resolve full identity (including vendor: Okta / Azure / generic WIF)
+    # by fetching one raw audit row for this user. Views collapse
+    # principalSubject into actor_email — so vendor detail is lost at the
+    # view layer. One targeted raw lookup here restores it.
+    from apps.api.contexts.observability.domain.identity import resolve as resolve_identity
+    identity_dict: dict[str, Any]
+    try:
+        if "@" in email:
+            id_where = "protopayload_auditlog.authenticationInfo.principalEmail = @email"
+        else:
+            # numeric / opaque OIDC subject — match against subject/<id>
+            id_where = (
+                "REGEXP_EXTRACT(protopayload_auditlog.authenticationInfo."
+                "principalSubject, r'subject/([^/]+)$') = @email"
+            )
+        id_sql = (
+            f"SELECT "
+            f"  protopayload_auditlog.authenticationInfo.principalEmail AS pe, "
+            f"  protopayload_auditlog.authenticationInfo.principalSubject AS ps "
+            f"FROM `{PROJECT}.{DATASET}.cloudaudit_googleapis_com_data_access` "
+            f"WHERE {id_where} LIMIT 1"
+        )
+        id_cfg = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("email", "STRING", email)]
+        )
+        id_rows = list(_bq.query(id_sql, job_config=id_cfg).result())
+        if id_rows:
+            r0 = id_rows[0]
+            ident = resolve_identity(r0.pe, r0.ps)
+        else:
+            # No audit row for this user — resolve from the actor_email
+            # canonical form alone (loses vendor detail but returns kind).
+            ident = resolve_identity(email, None)
+        identity_dict = {
+            "kind":     ident.kind.value,
+            "actor_id": ident.actor_id,
+            "display":  ident.display,
+            "is_human": ident.is_human,
+        }
+    except Exception as e:
+        log.warning("identity resolve failed for %s: %s", email, e)
+        ident = resolve_identity(email, None)
+        identity_dict = {
+            "kind": ident.kind.value, "actor_id": ident.actor_id,
+            "display": ident.display, "is_human": ident.is_human,
+        }
+
+    payload = {"actor_email": email, "source": "live_view" if live else "snapshot",
+               "identity": identity_dict, **results}
     return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
 
 
