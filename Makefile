@@ -1,6 +1,6 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
         tf-init tf-plan tf-apply tf-import-orphans preflight views bootstrap image \
-        deploy-infra deploy-views deploy resume doctor wizard all clean
+        deploy-infra deploy-views deploy resume doctor wizard test all clean
 
 # Auto-include per-project config from .env (if present) and export every
 # variable to subprocesses (uvicorn / terraform / gcloud). Users
@@ -95,6 +95,11 @@ tunnel-info:
 
 clean:
 	rm -rf $(VENV) apps/web/node_modules apps/web/dist
+
+# Run the full unit test suite. Exit 0 iff every test in tests/unit/ is green.
+# Called by the domain-dirty stop hook to prove RED→GREEN closure.
+test: py-deps
+	$(VENV)/bin/pytest tests/unit/ -v
 
 # ============================================================
 # Deployment to a fresh GCP project

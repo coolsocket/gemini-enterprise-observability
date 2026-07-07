@@ -39,8 +39,12 @@ VIEWS: dict[str, dict[str, str]] = {
     "v_data_access":              {"label": "Data Access 时间线", "desc": "每笔数据面读取（按真实 method 标注）"},
     "v_data_access_summary":      {"label": "谁查了什么",         "desc": "actor × engine 按 chat/session/feedback 分桶"},
     "v_user_usage":               {"label": "用户 × Engine",      "desc": "每用户在每个 engine 上的活动量"},
-    "v_session_files":            {"label": "文件活动会话",        "desc": "用户与 session files 的交互（list/download）"},
-    "v_agent_usage":              {"label": "Agent 调用统计",      "desc": "每个子 agent 接到的 chat traces / chunks"},
+    # v_session_files / v_agent_usage were removed 2026-07-07 — never had
+    # CREATE OR REPLACE in views.sql.tmpl (registry-vs-tmpl drift). The
+    # Files.tsx panels that queried them now degrade to EmptyState via the
+    # _rows() 2nd-NotFound catch. If we ever build the underlying signals,
+    # re-add here AND add the view definition to views.sql.tmpl (locked by
+    # test_registry_subset_of_views_sql_tmpl).
     "v_agentspace_navigation":          {"label": "Agentspace 入口浏览",  "desc": "用户打开了哪个 special agent / NotebookLM / Deep Research 页面"},
     "v_agentspace_navigation_summary":  {"label": "Agentspace 入口汇总",  "desc": "按用户 pivot：home / gallery / deep-research / notebook-lm / custom agent 访问次数"},
     "v_agent_directory":                {"label": "Agent 目录",          "desc": "每个 agent 一行：built-in (Deep Research / NotebookLM / A2A) + custom"},
@@ -55,7 +59,7 @@ VIEWS: dict[str, dict[str, str]] = {
 VIEWS_WITH_ORIGIN: set[str] = {
     "v_user_persona", "v_conversations", "v_conversations_with_response",
     "v_admin_activity", "v_builders", "v_data_access",
-    "v_data_access_summary", "v_user_usage", "v_session_files",
+    "v_data_access_summary", "v_user_usage",
     "v_agentspace_navigation", "v_agentspace_navigation_summary",
     "v_deep_research_prompts", "v_custom_agent_prompts",
 }
@@ -64,7 +68,7 @@ VIEWS_WITH_ORIGIN: set[str] = {
 VIEWS_WITH_ENGINE: set[str] = {
     "v_conversations", "v_conversations_with_response",
     "v_admin_activity", "v_data_access", "v_data_access_summary",
-    "v_user_usage", "v_engine_adoption", "v_session_files", "v_agent_usage",
+    "v_user_usage", "v_engine_adoption",
     "v_agentspace_navigation",
 }
 
@@ -83,8 +87,6 @@ VIEW_TIME_COL: dict[str, "str | None"] = {
     "v_engine_adoption":             None,
     "v_zero_use_seats":              None,
     "v_dau":                         "d",  # DATE not TIMESTAMP
-    "v_session_files":               "last_op",
-    "v_agent_usage":                 None,
     "v_agentspace_navigation":       "last_visit",
     "v_agentspace_navigation_summary": "last_visit",
     "v_agent_directory":             "last_activity",

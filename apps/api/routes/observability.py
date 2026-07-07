@@ -76,7 +76,19 @@ def _rows(view: str, limit: int = 1000, origin: Optional[str] = None,
         fallback_sql = render_live_fallback_sql(spec)
         log.warning("snapshot %s not found — falling back to live view %s",
                     snapshot_name(view), src)
-        return [_json_safe(dict(r)) for r in _bq.query(fallback_sql).result()]
+        try:
+            return [_json_safe(dict(r)) for r in _bq.query(fallback_sql).result()]
+        except NotFound:
+            # Both snapshot AND live view are missing. Usually means either
+            # the view was never applied (log-sink source tables not yet
+            # created — fresh deploy waiting on GE traffic) or the view is
+            # listed in the registry but has no CREATE OR REPLACE in
+            # views.sql.tmpl (registry-vs-tmpl drift). Degrade to empty
+            # rather than 500 — the SPA has EmptyState UI for this.
+            log.warning("live view %s also not found — returning empty; "
+                        "either log-sink tables not yet materialized, or "
+                        "view is registered without a definition", view)
+            return []
 
 
 @router.get("/api/v/{view}")
