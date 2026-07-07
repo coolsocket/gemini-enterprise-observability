@@ -175,9 +175,26 @@ def seed_quota_config() -> None:
     from google.cloud import bigquery
     client = bigquery.Client(project=PROJECT)
 
-    # 1) Static seeds (only if missing, don't overwrite user changes)
-    for key, value in [("purchased_seats", PURCHASED_SEATS),
-                        ("claimed_window_days", CLAIMED_WINDOW_DAYS)]:
+    # 1) Static seeds (only if missing, don't overwrite user changes).
+    # Tier defaults surface in Quota.tsx as editable numbers — admins
+    # tune them via the UI (POST /api/quota/config). Bootstrap only
+    # sets them if absent so re-runs are idempotent and don't clobber
+    # admin edits. Values are starting points, all editable in-app.
+    TIER_DEFAULTS = [
+        # standard tier (baseline license)
+        ("tier.standard.chat_daily",           "50"),   # ~10 sessions/day
+        ("tier.standard.deep_research_daily",   "3"),
+        ("tier.standard.agent_create_daily",    "1"),
+        ("tier.standard.storage_gib",          "10"),
+        # plus tier (SUBSCRIPTION_TIER_SEARCH_AND_ASSISTANT)
+        ("tier.plus.chat_daily",              "300"),
+        ("tier.plus.deep_research_daily",      "20"),
+        ("tier.plus.agent_create_daily",       "10"),
+        ("tier.plus.storage_gib",             "100"),
+    ]
+    for key, value in ([("purchased_seats", PURCHASED_SEATS),
+                        ("claimed_window_days", CLAIMED_WINDOW_DAYS)]
+                       + TIER_DEFAULTS):
         sql = f"""
         MERGE `{PROJECT}.{DATASET}.quota_config` t
         USING (SELECT '{key}' k, '{value}' v) s

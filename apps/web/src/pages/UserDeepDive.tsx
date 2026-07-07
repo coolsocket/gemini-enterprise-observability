@@ -38,6 +38,16 @@ const PERSONA_TAG: Record<string, string> = {
   SIMULATED:       "bg-info/15 text-info border-info/30",
 };
 
+// Per-engine breakdown sort — used inside user detail below.
+type EngineSortKey = "total" | "chat" | "dr" | "nb" | "files";
+const ENGINE_SORT_LABELS: Record<EngineSortKey, string> = {
+  total: "总量",
+  chat:  "Chat",
+  dr:    "Deep Research",
+  nb:    "NotebookLM",
+  files: "文件",
+};
+
 // ============================================================
 // User picker (landing) — searchable, sortable, filterable directory
 // ============================================================
@@ -375,6 +385,7 @@ export default function UserDeepDive() {
   // Track which metric/bar is currently expanded for drill-down
   const [openMetric, setOpenMetric] = useState<string | null>(null);
   const [openBar, setOpenBar] = useState<string | null>(null);
+  const [engineSort, setEngineSort] = useState<EngineSortKey>("total");
 
   if (!emailParam) return <Picker />;
   if (dive.isLoading) return <EmptyState title="加载中…" />;
@@ -567,6 +578,72 @@ export default function UserDeepDive() {
           </div>
         )}
       </Panel>
+
+      {/* Per-engine breakdown — sortable, only rows with engine_id
+          (NULL engine row is admin/audit noise without engine context) */}
+      {(() => {
+        const rows = d.data_access_summary.filter(r => r.engine_id);
+        if (rows.length === 0) return null;
+        const key = engineSort;
+        const scoreOf = (r: typeof rows[0]) => key === "total" ? r.total_data_access
+          : key === "chat" ? r.chat_turns
+          : key === "dr"   ? r.deep_research_calls
+          : key === "nb"   ? (r.notebooklm_notebook_ops + r.notebooklm_content_ops + r.notebooklm_audio_ops)
+          : /* files */      r.session_files;
+        const sorted = [...rows].sort((a, b) => scoreOf(b) - scoreOf(a));
+        return (
+          <Panel title={`按项目（Engine）拆分 · ${rows.length} 个 engine`}
+            action={
+              <div className="flex gap-1 text-[10px]">
+                {(Object.keys(ENGINE_SORT_LABELS) as EngineSortKey[]).map(k => (
+                  <button key={k}
+                    onClick={() => setEngineSort(k)}
+                    className={`h-6 px-2 rounded ${engineSort === k ? "bg-info/15 text-info border border-info/30" : "text-ink-secondary hover:text-ink-primary"}`}>
+                    {ENGINE_SORT_LABELS[k]}↓
+                  </button>
+                ))}
+              </div>
+            }>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-ink-muted border-b border-border-subtle/40">
+                  <th className="py-1.5 pr-3 font-normal">Engine</th>
+                  <th className="py-1.5 pr-3 font-normal text-right w-16">Chat</th>
+                  <th className="py-1.5 pr-3 font-normal text-right w-16">DR</th>
+                  <th className="py-1.5 pr-3 font-normal text-right w-20">Notebook</th>
+                  <th className="py-1.5 pr-3 font-normal text-right w-16">A2A</th>
+                  <th className="py-1.5 pr-3 font-normal text-right w-16">Search</th>
+                  <th className="py-1.5 pr-3 font-normal text-right w-16">Files</th>
+                  <th className="py-1.5 pr-3 font-normal text-right w-16">总量</th>
+                  <th className="py-1.5 pr-3 font-normal text-right w-32">最近</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((r, i) => {
+                  const nb = r.notebooklm_notebook_ops + r.notebooklm_content_ops + r.notebooklm_audio_ops;
+                  return (
+                    <tr key={i} className="border-b border-border-subtle/20 hover:bg-subtle/30">
+                      <td className="py-1 pr-3">
+                        <div className="text-ink-primary truncate max-w-[280px]" title={r.engine_id ?? ""}>
+                          {r.engine_display_name ?? r.engine_id_raw ?? r.engine_id}
+                        </div>
+                      </td>
+                      <td className={`py-1 pr-3 text-right tabular-nums ${r.chat_turns > 0 ? "text-ggreen font-medium" : "text-ink-muted"}`}>{r.chat_turns || "—"}</td>
+                      <td className={`py-1 pr-3 text-right tabular-nums ${r.deep_research_calls > 0 ? "text-info font-medium" : "text-ink-muted"}`}>{r.deep_research_calls || "—"}</td>
+                      <td className={`py-1 pr-3 text-right tabular-nums ${nb > 0 ? "text-gblue font-medium" : "text-ink-muted"}`}>{nb || "—"}</td>
+                      <td className={`py-1 pr-3 text-right tabular-nums ${r.a2a_invocations > 0 ? "text-ggreen font-medium" : "text-ink-muted"}`}>{r.a2a_invocations || "—"}</td>
+                      <td className={`py-1 pr-3 text-right tabular-nums ${r.programmatic_searches > 0 ? "text-gblue font-medium" : "text-ink-muted"}`}>{r.programmatic_searches || "—"}</td>
+                      <td className={`py-1 pr-3 text-right tabular-nums ${r.session_files > 0 ? "text-ink-secondary font-medium" : "text-ink-muted"}`}>{r.session_files || "—"}</td>
+                      <td className="py-1 pr-3 text-right tabular-nums font-semibold">{r.total_data_access}</td>
+                      <td className="py-1 pr-3 text-right font-mono text-ink-muted">{fmtTs(r.last_access)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Panel>
+        );
+      })()}
 
       {/* Agent gallery — visual bar chart */}
       {navItems.length > 0 && (
