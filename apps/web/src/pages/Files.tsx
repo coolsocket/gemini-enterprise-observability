@@ -13,9 +13,12 @@
 // limitations under the License.
 
 import { useQuery } from "@tanstack/react-query";
-import { api, AgentUsageRow, AgentspaceNavSummaryRow, AgentspaceNavRow, SessionFileRow } from "../api";
+import { api, AgentspaceNavSummaryRow, AgentspaceNavRow } from "../api";
 import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
+// NOTE: session-file and per-agent-usage panels were removed 2026-07-07
+// — the underlying views were never defined. If those aggregations
+// get built later, restore panels AND add the view definitions.
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
 import { useRange } from "../timerange";
@@ -37,14 +40,6 @@ export default function Files() {
   const { origin } = useOrigin();
   const { engineId } = useEngine();
   const { range } = useRange();
-  const files  = useQuery({
-    queryKey: ["v_session_files", origin, engineId, range],
-    queryFn: () => api.view<SessionFileRow>("v_session_files", origin, engineId, range),
-  });
-  const agents = useQuery({
-    queryKey: ["v_agent_usage", null, engineId, range],
-    queryFn: () => api.view<AgentUsageRow>("v_agent_usage", null, engineId, range),
-  });
   const navSum = useQuery({
     queryKey: ["v_agentspace_navigation_summary", origin, range],
     queryFn: () => api.view<AgentspaceNavSummaryRow>("v_agentspace_navigation_summary", origin, null, range),
@@ -53,31 +48,6 @@ export default function Files() {
     queryKey: ["v_agentspace_navigation", origin, engineId, range],
     queryFn: () => api.view<AgentspaceNavRow>("v_agentspace_navigation", origin, engineId, range),
   });
-
-  const fileCols: Col<SessionFileRow>[] = [
-    { key: "actor_email", label: "用户", mono: true },
-    { key: "origin", label: "Origin",
-      render: (r) => (
-        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${ORIGIN_TAG[r.origin ?? "UNKNOWN"]}`}>
-          {r.origin ?? "—"}
-        </span>
-      ) },
-    { key: "engine_display_name", label: "Engine",
-      render: (r) => <span className="text-xs">{r.engine_display_name ?? r.engine_id_raw}</span> },
-    { key: "session_id", label: "Session ID", mono: true,
-      render: (r) => <span className="text-xs text-ink-muted">{r.session_id.slice(0, 20)}…</span> },
-    { key: "list_calls", label: "List 调用", num: true,
-      render: (r) => <span className={r.list_calls > 5 ? "text-gblue font-medium" : "text-ink-secondary"}>{r.list_calls}</span> },
-    { key: "download_calls", label: "Download", num: true,
-      render: (r) => <span className={r.download_calls > 0 ? "text-ggreen font-medium" : "text-ink-muted"}>{r.download_calls}</span> },
-    { key: "file_activity_signal", label: "文件活动信号",
-      render: (r) => (
-        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${SIGNAL_TAG[r.file_activity_signal] ?? SIGNAL_TAG.unknown}`}>
-          {r.file_activity_signal}
-        </span>
-      ) },
-    { key: "last_op", label: "最近操作", mono: true, render: (r) => fmtTs(r.last_op) },
-  ];
 
   const navSumCols: Col<AgentspaceNavSummaryRow>[] = [
     { key: "actor_email", label: "用户", mono: true },
@@ -132,19 +102,6 @@ export default function Files() {
     { key: "last_visit", label: "最近", mono: true, render: (r) => fmtTs(r.last_visit) },
   ];
 
-  const agentCols: Col<AgentUsageRow>[] = [
-    { key: "agent_id", label: "Agent ID", mono: true,
-      render: (r) => <span className="text-gblue font-medium">{r.agent_id}</span> },
-    { key: "assistant_id", label: "Assistant", mono: true,
-      render: (r) => <span className="text-ink-muted text-xs">{r.assistant_id}</span> },
-    { key: "engine_display_name", label: "Engine",
-      render: (r) => <span className="text-xs">{r.engine_display_name ?? r.engine_id_raw}</span> },
-    { key: "traces", label: "对话数 (traces)", num: true,
-      render: (r) => <span className="text-ink-primary font-semibold">{r.traces}</span> },
-    { key: "chunks", label: "流式 chunks", num: true,
-      render: (r) => <span className="text-ink-secondary">{r.chunks}</span> },
-  ];
-
   return (
     <div className="space-y-4">
       {/* Data limit banner */}
@@ -179,23 +136,6 @@ export default function Files() {
         )}
       </Panel>
 
-      <Panel title={`文件活动 · ${files.data?.count ?? 0} 个 session`}>
-        {!files.data ? <EmptyState title="加载中…" /> :
-         files.data.rows.length === 0 ? (
-          <EmptyState title="无文件活动记录" hint="该 origin/engine 下没有 ListSessionFileMetadata 或 DownloadSessionFile 调用" />
-        ) : (
-          <DataTable rows={files.data.rows} cols={fileCols} filterKeys={["actor_email", "session_id"]} />
-        )}
-      </Panel>
-
-      <Panel title={`Agent 调用统计 · ${agents.data?.count ?? 0} 个 agent`}>
-        {!agents.data ? <EmptyState title="加载中…" /> :
-         agents.data.rows.length === 0 ? (
-          <EmptyState title="无 agent 调用数据" hint="需要通过 v1alpha REST API 调 chat 才会生成 gen_ai.choice 日志（GE 控制台 UI 不写）" />
-        ) : (
-          <DataTable rows={agents.data.rows} cols={agentCols} />
-        )}
-      </Panel>
     </div>
   );
 }

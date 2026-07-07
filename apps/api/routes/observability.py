@@ -403,6 +403,9 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
     return JSONResponse(content=payload, headers={"Cache-Control": "no-store"})
 
 
+MAX_SINCE_HOURS = 8760  # 1 year — beyond this BQ TIMESTAMP_SUB overflows
+
+
 @router.get("/api/summary")
 def summary(origin: Optional[str] = None, engine_id: Optional[str] = None, live: bool = False,
             since_hours: Optional[int] = None) -> dict[str, Any]:
@@ -416,6 +419,11 @@ def summary(origin: Optional[str] = None, engine_id: Optional[str] = None, live:
     observability domain module — this route just runs it and handles
     the snapshot-miss fallback (same shape as `_rows`; see INV-obs-001).
     """
+    # Guard: since_hours=999999999 overflows BQ TIMESTAMP_SUB and 500s.
+    # Cap silently — most callers who send huge values mean "unlimited",
+    # 1 year is far beyond any snapshot window.
+    if since_hours is not None and since_hours > MAX_SINCE_HOURS:
+        since_hours = MAX_SINCE_HOURS
     filters = build_summary_filters(origin=origin, engine_id=engine_id,
                                     live=live, since_hours=since_hours)
     sql = render_summary_sql(PROJECT, DATASET, filters)

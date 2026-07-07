@@ -15,7 +15,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, EngineRow, DataAccessSummaryRow, AgentUsageRow } from "../api";
+import { api, EngineRow, DataAccessSummaryRow } from "../api";
 import { Panel, EmptyState } from "../components/Card";
 import { fmtTs } from "../components/DataTable";
 import { useRange } from "../timerange";
@@ -38,11 +38,8 @@ function EngineCard({ engine }: { engine: EngineRow }) {
     queryFn: () => api.view<DataAccessSummaryRow>("v_data_access_summary", null, engine.engine_id, range),
     enabled: expanded,
   });
-  const agents = useQuery({
-    queryKey: ["engine-agents", engine.engine_id, range],
-    queryFn: () => api.view<AgentUsageRow>("v_agent_usage", null, engine.engine_id, range),
-    enabled: expanded,
-  });
+  // Sub-agent breakdown was removed 2026-07-07 with the un-defined
+  // per-agent aggregation view. Restore here if that view is built.
 
   const maxTurns = users.data ? Math.max(1, ...users.data.rows.map(u => u.chat_turns)) : 1;
 
@@ -126,33 +123,6 @@ function EngineCard({ engine }: { engine: EngineRow }) {
                     + {users.data.rows.length - 10} 更多…
                   </div>
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* Related agents */}
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-ink-muted mb-2">
-              关联的 sub-agents · <span className="text-ink-muted normal-case">(从 gen_ai.choice 抽取)</span>
-            </div>
-            {!agents.data ? (
-              <div className="text-xs text-ink-muted">加载中…</div>
-            ) : agents.data.rows.length === 0 ? (
-              <div className="text-xs text-ink-muted italic">无 sub-agent 调用（v1alpha REST 才写 gen_ai.choice）</div>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {agents.data.rows.map(a => (
-                  <button
-                    key={a.agent_id}
-                    onClick={(e) => { e.stopPropagation(); navigate(`/agent/${encodeURIComponent(a.agent_id)}`); }}
-                    className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md border border-border-subtle bg-surface text-xs hover:border-info/50 hover:bg-info-bg/10 transition-colors"
-                  >
-                    <span className="font-mono text-ink-primary">{a.agent_id}</span>
-                    <span className="text-ink-muted text-[10px]">·</span>
-                    <span className="text-info tabular-nums">{a.traces}</span>
-                    <span className="text-[10px] text-ink-muted">traces</span>
-                  </button>
-                ))}
               </div>
             )}
           </div>

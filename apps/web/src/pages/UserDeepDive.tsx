@@ -625,7 +625,7 @@ export default function UserDeepDive() {
                     <tr key={i} className="border-b border-border-subtle/20 hover:bg-subtle/30">
                       <td className="py-1 pr-3">
                         <div className="text-ink-primary truncate max-w-[280px]" title={r.engine_id ?? ""}>
-                          {r.engine_display_name ?? r.engine_id_raw ?? r.engine_id}
+                          {r.engine_display_name ?? r.engine_id ?? "—"}
                         </div>
                       </td>
                       <td className={`py-1 pr-3 text-right tabular-nums ${r.chat_turns > 0 ? "text-ggreen font-medium" : "text-ink-muted"}`}>{r.chat_turns || "—"}</td>
