@@ -82,7 +82,13 @@ variable "iap_invokers" {
 }
 
 variable "enable_scheduled_refresh" {
-  description = "If true, create the every-6h Scheduled Query that re-materializes snapshots. Needs apply_views.py to have been run first (views must exist)."
+  description = "If true, create the Scheduled Query that re-materializes snapshots. Needs apply_views.py to have been run first (views must exist)."
   type        = bool
   default     = false
+}
+
+variable "snapshot_refresh_schedule" {
+  description = "BigQuery Data Transfer schedule string for snapshot refresh. Format: 'every N hours' | 'every N minutes' | 'every day HH:MM' | crontab. Default 'every 6 hours' balances freshness against BQ query cost — bump to 'every 1 hours' for near-realtime demos, or 'every day 03:00' for once-nightly."
+  type        = string
+  default     = "every 6 hours"
 }

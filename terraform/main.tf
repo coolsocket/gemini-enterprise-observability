@@ -19,12 +19,28 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
+    # google-beta is only used for `google_project_service_identity`, which
+    # triggers on-demand creation of Google-managed service agents (e.g. the
+    # BQ Data Transfer agent). No beta-only resources otherwise.
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 6.0"
+    }
   }
 }
 
 provider "google" {
   project = var.project_id
   region  = var.region
+}
+
+provider "google-beta" {
+  project = var.project_id
+  region  = var.region
+}
+
+data "google_project" "this" {
+  project_id = var.project_id
 }
 
 # ============================================================
@@ -334,13 +350,38 @@ resource "google_cloud_run_v2_service_iam_binding" "invokers" {
 # ============================================================
 # 6) Snapshot refresh — BQ Scheduled Query every 6 hours
 # ============================================================
+# The BQ Data Transfer service agent (service-<project_number>@gcp-sa-
+# bigquerydatatransfer.iam.gserviceaccount.com) needs TokenCreator on the
+# dashboard SA so it can impersonate `service_account_name` when running
+# the scheduled query. Without this grant, the first refresh fails with:
+#   Error code 9 : DTS service agent needs iam.serviceAccounts.getAccessToken
+#   permission on ge-observability-sa@<project>...
+# Reported by @panliuyang-debug in issue #2.
+resource "google_project_service_identity" "bq_dts_agent" {
+  count    = var.enable_scheduled_refresh ? 1 : 0
+  provider = google-beta
+  project  = var.project_id
+  service  = "bigquerydatatransfer.googleapis.com"
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_service_account_iam_member" "dts_token_creator" {
+  count              = var.enable_scheduled_refresh ? 1 : 0
+  service_account_id = google_service_account.dashboard_sa.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service_identity.bq_dts_agent]
+}
+
 resource "google_bigquery_data_transfer_config" "snapshot_refresh" {
   count                = var.enable_scheduled_refresh ? 1 : 0
   project              = var.project_id
   location             = lower(var.bq_location)
   display_name         = "GE Observability snapshot refresh"
   data_source_id       = "scheduled_query"
-  schedule             = "every 6 hours"
+  schedule             = var.snapshot_refresh_schedule
   service_account_name = google_service_account.dashboard_sa.email
   params = {
     query = templatefile("${path.module}/snapshot_refresh.sql.tftpl", {
@@ -352,6 +393,7 @@ resource "google_bigquery_data_transfer_config" "snapshot_refresh" {
     google_bigquery_dataset.ge_observability,
     google_project_iam_member.dashboard_bq_jobuser,
     google_project_service.required,
+    google_service_account_iam_member.dts_token_creator,
   ]
 }
 

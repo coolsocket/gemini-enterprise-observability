@@ -291,7 +291,6 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
         "notebooklm_events":   f"SELECT timestamp, action, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email AND full_method LIKE '%notebooklm.%' ORDER BY timestamp DESC LIMIT 100",
         "a2a_events":          f"SELECT timestamp, action, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email AND full_method LIKE '%assistants.agents.a2a.v1.%' ORDER BY timestamp DESC LIMIT 100",
         "chat_events":         f"SELECT timestamp, action, full_method FROM `{tbl('v_data_access')}` WHERE actor_email = @email AND (full_method LIKE '%AssistantService.StreamAssist' OR full_method LIKE '%AssistantService.Assist') ORDER BY timestamp DESC LIMIT 100",
-        "session_files":       f"SELECT * FROM `{tbl('v_session_files')}` WHERE actor_email = @email ORDER BY last_op DESC LIMIT 30",
         # Raw per-visit navigation events (un-aggregated, for drill-down)
         # Always live: navigation lives in user_activity table, no snapshot for the raw stream
         "agentspace_events":   f"""SELECT
@@ -306,12 +305,12 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
             LIMIT 200""",
         # Deep Research prompt reverse-attribution (±60s heuristic)
         "dr_prompts":          f"""SELECT dr_ts, dr_action, attributed_prompt, prompt_ts, attribution_delta_sec, engine_display_name
-            FROM `{PROJECT}.{DATASET}.v_deep_research_prompts`
+            FROM `{tbl('v_deep_research_prompts')}`
             WHERE actor_email = @email
             ORDER BY dr_ts DESC LIMIT 100""",
         # Custom-agent prompt attribution (5min-after-open heuristic)
         "custom_agent_prompts": f"""SELECT prompt_ts, agent_id, agent_name, agent_open_ts, elapsed_since_open_sec, prompt, engine_display_name
-            FROM `{PROJECT}.{DATASET}.v_custom_agent_prompts`
+            FROM `{tbl('v_custom_agent_prompts')}`
             WHERE actor_email = @email
             ORDER BY prompt_ts DESC LIMIT 100""",
     }

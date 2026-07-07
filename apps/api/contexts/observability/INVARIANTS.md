@@ -31,3 +31,33 @@ genuine problems (permission, SQL syntax, quota).
 
 - **Code:** `apps/api/routes/refresh.py::refresh_now`
 - **Test:** `tests/unit/test_refresh_skips_missing_views.py`
+
+## INV-obs-003: `/api/user/{email}` honors `live` uniformly
+
+Every `FROM` clause inside `user_deep_dive` MUST route through the
+`tbl()` lambda so `?live=false` (default) reads snapshots consistently
+and `?live=true` reads live views consistently. A single hardcoded
+`{PROJECT}.{DATASET}.v_*` inside the queries dict silently bypasses
+the operator's choice and creates two anomalies:
+
+  - `live=false` still hits BQ live for that one panel — defeats the
+    whole point of snapshotting.
+  - The panel's freshness diverges from the rest of the page.
+
+Exception: `agentspace_events` legitimately queries the raw
+`discoveryengine_googleapis_com_gemini_enterprise_user_activity` sink
+table directly — there is no `v_*` for the un-aggregated stream.
+
+- **Code:** `apps/api/routes/observability.py::user_deep_dive`
+- **Test:** `tests/unit/test_user_deep_dive_live_flag.py`
+
+## INV-obs-004: lifespan is the startup hook
+
+App startup work MUST be wired through FastAPI's lifespan context
+manager, not `app.add_event_handler("startup", …)`. The event-handler
+form AttributeErrors on some FastAPI/starlette version combos in the
+wild (reported on responsive-lens-421108, 2026-07-07). Lifespan is
+the officially supported cross-version hook.
+
+- **Code:** `apps/api/main.py::lifespan`
+- **Test:** `tests/unit/test_lifespan_not_add_event.py`

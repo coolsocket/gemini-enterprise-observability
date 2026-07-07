@@ -20,6 +20,7 @@ The SPA catch-all MUST be last so it doesn't shadow /api/* endpoints.
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -29,16 +30,24 @@ from apps.api.routes import meta, observability, quota, refresh, spa
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="GE Observability", version="2.0")
+
+# `@router.on_event` doesn't fire for included routers, and
+# `app.add_event_handler(...)` AttributeErrors on some FastAPI/starlette
+# combos in the wild (reported 2026-07-07 on responsive-lens-421108).
+# The lifespan context manager is the officially supported hook that
+# works across every version — kick the seat auto-refresh here.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await refresh._start_seat_refresh_loop()
+    yield
+
+
+app = FastAPI(title="GE Observability", version="2.0", lifespan=lifespan)
 
 app.include_router(meta.router)
 app.include_router(observability.router)
 app.include_router(quota.router)
 app.include_router(refresh.router)
-
-# Seat auto-refresh loop — `@router.on_event` doesn't fire for included
-# routers, so register at the app level.
-app.add_event_handler("startup", refresh._start_seat_refresh_loop)
 
 # Static + SPA LAST — /{path:path} is a catch-all that would shadow /api/*.
 WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
