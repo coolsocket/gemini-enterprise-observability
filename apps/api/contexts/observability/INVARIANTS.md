@@ -51,6 +51,31 @@ table directly — there is no `v_*` for the un-aggregated stream.
 - **Code:** `apps/api/routes/observability.py::user_deep_dive`
 - **Test:** `tests/unit/test_user_deep_dive_live_flag.py`
 
+## INV-obs-006: v_user_persona chat MUST fall back to Path 3 audit
+
+Tenants without "Prompt & Response Logging" enabled in GE Admin
+Console have Path 2 (`user_activity`) empty for chat activity —
+StreamAssist events only land in Path 3 (audit `data_access`).
+
+v_user_persona's `chat` CTE (Path 2 source) MUST be joined with an
+`audit_chat` CTE (Path 3 source, from v_data_access_summary) and
+the numeric metrics merged via GREATEST. Persona classification
+threshold WHEN clauses (POWER_USER, ACTIVE_CONSUMER, TRIAL) MUST
+consume the GREATEST-merged value, not raw chat.chat_turns_*.
+
+**Violation shape**: verified on responsive-lens-421108 (mirrored
+into ge_demo_readonly 2026-07-07). Actor 11126728 had 18 chat +
+9 DR in v_data_access_summary but v_user_persona.chat_turns_total = 0,
+classified LURKER. 101 of 104 real OIDC users incorrectly LURKER.
+After fix: 19 ACTIVE_CONSUMER + 35 TRIAL surfaced.
+
+GREATEST (not SUM) because when both P&R and audit logging are on,
+the same StreamAssist event is logged in both paths — SUM would
+double-count. audit is a superset when both on.
+
+- **Code:** `infra/sql_templates/views.sql.tmpl` → v_user_persona
+- **Test:** `tests/unit/test_user_persona_chat_from_audit.py`
+
 ## INV-obs-005: audit views MUST resolve principal via COALESCE
 
 Every view that reads `protopayload_auditlog.authenticationInfo.

@@ -408,6 +408,8 @@ WITH
     SELECT actor_email FROM `{{PROJECT}}.{{DATASET}}.v_data_access` WHERE actor_email IS NOT NULL
   ),
   chat AS (
+    -- Path 2 (user_activity) chat — only populated when the engine has
+    -- "Prompt & Response Logging" enabled in GE Admin Console.
     SELECT actor_email,
       SUM(chat_turns) AS chat_turns_total,
       SUM(session_count) AS sessions_total,
@@ -415,6 +417,23 @@ WITH
       SUM(IF(last_seen >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY), session_count, 0)) AS sessions_7d,
       MAX(last_seen) AS last_chat
     FROM `{{PROJECT}}.{{DATASET}}.v_user_usage` GROUP BY actor_email
+  ),
+  audit_chat AS (
+    -- Path 3 (audit log) chat — always populated when Data Access audit
+    -- is on. Tenants without P&R Logging have Path 2 empty for chat but
+    -- ALL their StreamAssist events land here. Without this branch,
+    -- every OIDC user classifies as LURKER regardless of real activity.
+    -- v_data_access_summary already aggregates chat_turns per actor from
+    -- audit; we re-use it rather than re-scanning the raw audit table.
+    -- last_access is per-actor, not per-day → 7d approximation: if the
+    -- most recent audit event is within 7d, treat all chat as 7d activity.
+    -- Acceptable for persona classification (7d/total thresholds are
+    -- coarse); a follow-up could split by DATE(timestamp) in raw audit.
+    SELECT actor_email,
+      SUM(chat_turns) AS chat_turns_total,
+      SUM(IF(last_access >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY), chat_turns, 0)) AS chat_turns_7d,
+      MAX(last_access) AS last_chat
+    FROM `{{PROJECT}}.{{DATASET}}.v_data_access_summary` GROUP BY actor_email
   ),
   build AS (
     SELECT actor_email,
@@ -433,8 +452,11 @@ SELECT
     WHEN a.actor_email LIKE '%@%' AND a.actor_email NOT LIKE '%gserviceaccount.com' THEN 'HUMAN'
     ELSE 'UNKNOWN'
   END AS origin,
-  IFNULL(chat.chat_turns_total, 0) AS chat_turns_total,
-  IFNULL(chat.chat_turns_7d, 0) AS chat_turns_7d,
+  -- GREATEST(Path 2, Path 3) — audit is always ≥ user_activity for the
+  -- same StreamAssist event when both logging modes are on, so GREATEST
+  -- picks whichever has data. Neither → 0.
+  GREATEST(IFNULL(chat.chat_turns_total, 0), IFNULL(audit_chat.chat_turns_total, 0)) AS chat_turns_total,
+  GREATEST(IFNULL(chat.chat_turns_7d, 0), IFNULL(audit_chat.chat_turns_7d, 0)) AS chat_turns_7d,
   IFNULL(chat.sessions_total, 0) AS sessions_total,
   IFNULL(build.agents_c, 0) + IFNULL(build.engines_c, 0) + IFNULL(build.ds_c, 0) AS resources_created,
   IFNULL(build.agents_c, 0) AS agents_created,
@@ -443,15 +465,20 @@ SELECT
   CASE
     WHEN a.actor_email LIKE '%gserviceaccount.com' AND a.actor_email NOT LIKE '{{SIM_PATTERN}}' THEN 'AUTOMATION'
     WHEN IFNULL(build.agents_c, 0) + IFNULL(build.engines_c, 0) + IFNULL(build.ds_c, 0) >= 1 THEN 'BUILDER'
-    WHEN IFNULL(chat.chat_turns_7d, 0) >= 20 AND IFNULL(chat.sessions_7d, 0) >= 3 THEN 'POWER_USER'
-    WHEN IFNULL(chat.chat_turns_7d, 0) >= 5 THEN 'ACTIVE_CONSUMER'
-    WHEN IFNULL(chat.chat_turns_total, 0) BETWEEN 1 AND 4 THEN 'TRIAL'
+    WHEN GREATEST(IFNULL(chat.chat_turns_7d, 0), IFNULL(audit_chat.chat_turns_7d, 0)) >= 20 AND IFNULL(chat.sessions_7d, 0) >= 3 THEN 'POWER_USER'
+    WHEN GREATEST(IFNULL(chat.chat_turns_7d, 0), IFNULL(audit_chat.chat_turns_7d, 0)) >= 5 THEN 'ACTIVE_CONSUMER'
+    WHEN GREATEST(IFNULL(chat.chat_turns_total, 0), IFNULL(audit_chat.chat_turns_total, 0)) BETWEEN 1 AND 4 THEN 'TRIAL'
     ELSE 'LURKER'
   END AS persona,
-  GREATEST(IFNULL(chat.last_chat, TIMESTAMP('1970-01-01')), IFNULL(build.last_admin, TIMESTAMP('1970-01-01'))) AS last_seen,
+  GREATEST(
+    IFNULL(chat.last_chat, TIMESTAMP('1970-01-01')),
+    IFNULL(audit_chat.last_chat, TIMESTAMP('1970-01-01')),
+    IFNULL(build.last_admin, TIMESTAMP('1970-01-01'))
+  ) AS last_seen,
   LEAST(IFNULL(chat.last_chat, TIMESTAMP('9999-12-31')), IFNULL(build.last_admin, TIMESTAMP('9999-12-31'))) AS first_seen
 FROM actors a
 LEFT JOIN chat USING (actor_email)
+LEFT JOIN audit_chat USING (actor_email)
 LEFT JOIN build USING (actor_email);
 
 -- ---------------------------------------------------------------
