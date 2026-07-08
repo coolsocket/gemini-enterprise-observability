@@ -288,10 +288,24 @@ function qs(params: Record<string, string | number | null | undefined>): string 
   return parts.length ? "?" + parts.join("&") : "";
 }
 
+// Kinds emitted by apps/api/contexts/observability/domain/identity.py.
+// Keep in sync with IdentityKind enum there.
+export type IdentityKind =
+  | "google_email"
+  | "oidc_wif_okta"
+  | "oidc_wif_azure"
+  | "oidc_wif_generic"
+  | "oidc_subject"
+  | "service_account"
+  | "simulated"
+  | "unknown";
+
 export type UserListEntry = {
   actor_email: string;
   origin: Origin;
   persona: Persona | null;
+  identity_kind: IdentityKind;
+  is_human: boolean;
   chat_turns: number;
   deep_research_calls: number;
   notebooklm_ops: number;

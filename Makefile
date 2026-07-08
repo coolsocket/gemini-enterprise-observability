@@ -1,6 +1,6 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
         tf-init tf-plan tf-apply tf-import-orphans preflight views bootstrap image \
-        deploy-infra deploy-views deploy resume doctor wizard test all clean
+        deploy-infra deploy-views deploy resume doctor wizard test hotfix all clean
 
 # Auto-include per-project config from .env (if present) and export every
 # variable to subprocesses (uvicorn / terraform / gcloud). Users
@@ -100,6 +100,33 @@ clean:
 # Called by the domain-dirty stop hook to prove RED→GREEN closure.
 test: py-deps
 	$(VENV)/bin/pytest tests/unit/ -v
+
+# One-command post-`git pull` recipe. Does NOT auto-`git pull` (operator
+# feedback: pull is their decision, not a hidden side effect). Applies
+# latest view SQL, then triggers a snapshot refresh so dashboards
+# actually reflect the new definitions (views are lazily-evaluated but
+# the dashboards read snapshots — without a refresh, stale rows).
+#
+# Usage:
+#   git pull                         # operator does this themselves
+#   make hotfix PROJECT=<id>         # or leaves PROJECT unset — falls
+#                                    # through to the check-project
+#                                    # BQ_PROJECT / gcloud fallback chain
+#
+# Post-refresh, api/refresh returns a large JSON — we don't parse it,
+# just fire and log. `|| true` so the recipe never fails on a slow BQ
+# response (curl timeout != real error; snapshot refresh keeps running
+# in the background of the Python process).
+hotfix: check-project py-deps views
+	@echo ""
+	@echo "→ Views applied. Triggering snapshot refresh via /api/refresh…"
+	@echo "  (if uvicorn isn't running on port $(PORT), skip this step and"
+	@echo "   run 'make serve' first, then POST /api/refresh manually.)"
+	@curl -sS -m 30 -X POST "http://127.0.0.1:$(PORT)/api/refresh?triggered_by=hotfix" >/dev/null 2>&1 \
+	  && echo "  ✓ refresh triggered" \
+	  || echo "  ⚠ curl failed — is uvicorn running on http://127.0.0.1:$(PORT)/ ? Start it with 'make serve' and re-POST /api/refresh."
+	@echo ""
+	@echo "✓ hotfix done. Dashboard should reflect the pulled changes now."
 
 # ============================================================
 # Deployment to a fresh GCP project

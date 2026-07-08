@@ -38,6 +38,19 @@ const PERSONA_TAG: Record<string, string> = {
   SIMULATED:       "bg-info/15 text-info border-info/30",
 };
 
+// identity_kind badge — one icon + tooltip per IdP kind.
+// Keep tuple order stable so tests/greps can pattern-match easily.
+const IDENTITY_BADGE: Record<string, { icon: string; label: string; cls: string }> = {
+  google_email:     { icon: "🅶", label: "Google",     cls: "bg-ggreen/10 text-ggreen border-ggreen/25" },
+  oidc_wif_okta:    { icon: "🅾", label: "Okta",       cls: "bg-info/10 text-info border-info/25" },
+  oidc_wif_azure:   { icon: "Ⓜ", label: "Microsoft",  cls: "bg-gblue/10 text-gblue border-gblue/25" },
+  oidc_wif_generic: { icon: "🆔", label: "OIDC WIF",   cls: "bg-info/10 text-info border-info/25" },
+  oidc_subject:     { icon: "🆔", label: "OIDC",       cls: "bg-info/8 text-info border-info/20" },
+  service_account:  { icon: "⚙", label: "SA",         cls: "bg-warn/10 text-warn border-warn/25" },
+  simulated:        { icon: "🎭", label: "Sim",        cls: "bg-ink-muted/10 text-ink-muted border-ink-muted/25" },
+  unknown:          { icon: "?", label: "Unknown",    cls: "bg-ink-muted/10 text-ink-muted border-ink-muted/25" },
+};
+
 // Per-engine breakdown sort — used inside user detail below.
 type EngineSortKey = "total" | "chat" | "dr" | "nb" | "files";
 const ENGINE_SORT_LABELS: Record<EngineSortKey, string> = {
@@ -191,6 +204,18 @@ function Picker() {
                   <span className="font-mono text-ink-primary group-hover:text-info truncate" title={u.actor_email}>
                     {shortenEmail(u.actor_email)}
                   </span>
+                  {(() => {
+                    const badge = IDENTITY_BADGE[u.identity_kind] ?? IDENTITY_BADGE.unknown;
+                    return (
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium border shrink-0 ${badge.cls}`}
+                        title={`identity_kind = ${u.identity_kind}`}
+                      >
+                        <span>{badge.icon}</span>
+                        <span>{badge.label}</span>
+                      </span>
+                    );
+                  })()}
                   {u.engines_touched > 1 && (
                     <span className="text-[9px] text-ink-muted ml-1 shrink-0">×{u.engines_touched} eng</span>
                   )}

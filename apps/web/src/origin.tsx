@@ -23,10 +23,13 @@ export function OriginProvider({ children }: { children: ReactNode }) {
     try {
       const saved = localStorage.getItem("ge-origin");
       if (saved === "HUMAN" || saved === "AUTOMATION" || saved === "SIMULATED") return saved;
-      // First visit: default to HUMAN so sim noise doesn't pollute view
-      if (saved === "ALL") return null;
-      return "HUMAN";
-    } catch { return "HUMAN"; }
+      // First visit: default to null (全部). Old default was "HUMAN"
+      // which hid every UNKNOWN principal — bad UX for fresh OIDC-only
+      // tenants where a stale view SQL might mis-classify everyone as
+      // UNKNOWN and the page looks empty. Better default: show all,
+      // let the user tighten filter if the mix is noisy.
+      return null;
+    } catch { return null; }
   });
   useEffect(() => {
     try {
