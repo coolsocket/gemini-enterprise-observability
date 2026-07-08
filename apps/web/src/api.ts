@@ -321,6 +321,12 @@ export type UserListEntry = {
 
 export type UserDeepDive = {
   actor_email: string;
+  identity: {
+    kind: IdentityKind;
+    actor_id: string;
+    display: string;
+    is_human: boolean;
+  };
   persona: PersonaRow[];
   data_access_summary: DataAccessSummaryRow[];
   agentspace_summary: AgentspaceNavSummaryRow[];

@@ -1,0 +1,81 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Unit-test CI. Runs on every push + PR to main. Blocks silent
+# regressions across the invariant-heavy view/domain layer. Keep this
+# fast (<1min); actual BQ integration testing is deliberately out of
+# scope (needs live GCP + costs money).
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            apps/api/requirements.txt
+            apps/api/requirements-dev.txt
+
+      - name: Install Python deps
+        # apps/api/requirements-dev.txt -r's requirements.txt and pins
+        # pytest — same as `make py-deps` uses.
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q --upgrade pip
+          .venv/bin/pip install -q -r apps/api/requirements-dev.txt
+
+      - name: Run unit tests
+        # `make test` handles the venv path + pytest invocation.
+        # If unit-test signal ever needs to consult /tmp/ge-samples
+        # fixtures, they're absent in CI — those tests skip themselves.
+        run: make test
+
+  web-build:
+    # TypeScript compile is our second regression guard — several bugs
+    # this session were "types drift + prod build fails after PR merge".
+    # Fast: ~15s cold, ~5s cached.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install web deps
+        run: cd apps/web && npm ci --no-audit --no-fund
+
+      - name: TypeScript compile + vite build
+        # `npm run build` runs `tsc -b && vite build` — TS errors fail.
+        run: cd apps/web && npm run build

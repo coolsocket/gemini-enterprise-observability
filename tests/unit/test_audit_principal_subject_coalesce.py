@@ -73,6 +73,11 @@ def test_every_principalemail_read_is_coalesced_with_principalsubject() -> None:
         window = "\n".join(src.splitlines()[max(0, i - 4): i + 3])
         if "COALESCE" in window and "principalSubject" in window and _SUBJECT_EXTRACT.search(window):
             continue
+        # Post-2026-07-08: COALESCE was extracted into the `canonical_actor`
+        # UDF (INV-obs-005 + INV-obs-007). Any principalEmail read inside a
+        # canonical_actor(...) call — even multi-line — is still compliant.
+        if "canonical_actor" in window and "principalSubject" in window:
+            continue
         violations.append(f"line {i}: {stripped[:100]}")
     assert not violations, (
         f"{len(violations)} SELECT-side read(s) of principalEmail not COALESCEd "

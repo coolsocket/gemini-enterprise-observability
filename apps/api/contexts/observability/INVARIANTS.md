@@ -104,21 +104,33 @@ double-count. audit is a superset when both on.
 - **Code:** `infra/sql_templates/views.sql.tmpl` → v_user_persona
 - **Test:** `tests/unit/test_user_persona_chat_from_audit.py`
 
-## INV-obs-005: audit views MUST resolve principal via COALESCE
+## INV-obs-005: audit views MUST resolve principal via canonical_actor UDF
 
 Every view that reads `protopayload_auditlog.authenticationInfo.
-principalEmail` in a projection MUST COALESCE it with subject-extraction
-from `principalSubject`:
+principalEmail` in a projection MUST route through the `canonical_actor`
+UDF (defined at top of `views.sql.tmpl`):
 
 ```sql
-COALESCE(
+`{{PROJECT}}.{{DATASET}}.canonical_actor`(
   protopayload_auditlog.authenticationInfo.principalEmail,
-  REGEXP_EXTRACT(
-    protopayload_auditlog.authenticationInfo.principalSubject,
-    r'subject/([^/]+)$'
-  )
+  protopayload_auditlog.authenticationInfo.principalSubject
 )
 ```
+
+The UDF's body (single source of truth for the extraction form):
+```sql
+CREATE OR REPLACE FUNCTION `{{PROJECT}}.{{DATASET}}.canonical_actor`(email STRING, subject STRING) AS (
+  COALESCE(
+    email,
+    REGEXP_EXTRACT(subject, r'subject/([^/]+)$'),
+    REGEXP_EXTRACT(subject, r'serviceAccounts/([^/]+)')
+  )
+);
+```
+
+If you edit the UDF body, ALSO update the Python IdentityResolver
+(`apps/api/contexts/observability/domain/identity.py`) so both
+layers agree on actor_id extraction. INV-obs-007 owns that contract.
 
 **Violation shape**: on a tenant that authenticates users via OIDC or
 Workforce Identity Federation, `principalEmail` is NULL for real users.

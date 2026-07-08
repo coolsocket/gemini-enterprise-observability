@@ -528,6 +528,22 @@ export default function UserDeepDive() {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="font-mono text-base text-ink-primary truncate">{d.actor_email}</div>
+          {/* Identity badge (from backend IdentityResolver) — shows IdP vendor.
+              Detail-page badge shows the full `display` (with pool name for
+              WIF) not just the icon+label the picker uses. */}
+          {d.identity && (() => {
+            const badge = IDENTITY_BADGE[d.identity.kind] ?? IDENTITY_BADGE.unknown;
+            return (
+              <div className="mt-1 text-[11px] text-ink-muted">
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${badge.cls} mr-2`}
+                      title={`identity_kind = ${d.identity.kind}`}>
+                  <span>{badge.icon}</span>
+                  <span>{badge.label}</span>
+                </span>
+                <span className="text-ink-secondary">{d.identity.display}</span>
+              </div>
+            );
+          })()}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             {persona && (
               <>
