@@ -30,8 +30,13 @@
 -- (INV-obs-007).
 -- ---------------------------------------------------------------
 CREATE OR REPLACE FUNCTION `{{PROJECT}}.{{DATASET}}.canonical_actor`(email STRING, subject STRING) AS (
+  -- NULLIF wraps `email` so empty-string principals (not just NULL ones)
+  -- fall through to the subject extractors. Some audit log rows carry
+  -- principalEmail='' alongside a populated principalSubject — without
+  -- NULLIF the COALESCE would return '' and downstream IS NOT NULL
+  -- filters would let a phantom empty-actor row through.
   COALESCE(
-    email,
+    NULLIF(email, ''),
     REGEXP_EXTRACT(subject, r'subject/([^/]+)$'),
     REGEXP_EXTRACT(subject, r'serviceAccounts/([^/]+)')
   )

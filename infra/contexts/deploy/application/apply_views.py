@@ -76,8 +76,14 @@ statements = [s for s in raw if "CREATE OR REPLACE" in s.upper()]
 
 
 def _view_name(stmt: str) -> str:
-    """Extract the target view name from a CREATE OR REPLACE VIEW statement."""
-    m = _re.search(r"CREATE\s+OR\s+REPLACE\s+VIEW\s+`?([^`\s(]+)`?", stmt, _re.IGNORECASE)
+    """Extract the target name from a CREATE OR REPLACE VIEW / FUNCTION
+    statement. Both live in views.sql.tmpl (UDF at top, then N views).
+    Without matching FUNCTION here, the `canonical_actor` UDF would log
+    as 'unknown' in the applied list — confusing during first deploy."""
+    m = _re.search(
+        r"CREATE\s+OR\s+REPLACE\s+(?:VIEW|FUNCTION)\s+`?([^`\s(]+)`?",
+        stmt, _re.IGNORECASE,
+    )
     return m.group(1).split(".")[-1] if m else "unknown"
 
 
