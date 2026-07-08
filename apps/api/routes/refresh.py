@@ -49,14 +49,27 @@ router = APIRouter()
 
 @router.get("/api/refresh/status")
 def refresh_status() -> dict[str, Any]:
-    """Last refresh metadata per snapshot."""
+    """Last refresh metadata per snapshot. Degrades gracefully to empty +
+    hint when snapshot_meta table doesn't exist (fresh deploy, terraform
+    hasn't run yet, or admin dropped the table)."""
+    from google.api_core.exceptions import NotFound
     sql = f"""
     SELECT snapshot_name, source_view, refreshed_at, row_count, refresh_seconds, triggered_by
     FROM `{PROJECT}.{DATASET}.snapshot_meta`
     QUALIFY ROW_NUMBER() OVER (PARTITION BY snapshot_name ORDER BY refreshed_at DESC) = 1
     ORDER BY refreshed_at DESC
     """
-    rows = [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+    try:
+        rows = [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+    except NotFound:
+        return {
+            "snapshots": [], "last_refresh": None, "snapshot_count": 0,
+            "note": (
+                f"snapshot_meta table not present in {PROJECT}.{DATASET}. "
+                "Run `make bootstrap` (or `terraform apply`) to create it, "
+                "then POST /api/refresh to populate."
+            ),
+        }
     most_recent = max((r["refreshed_at"] for r in rows), default=None)
     return {
         "snapshots": rows,
@@ -93,12 +106,14 @@ def _fetch_and_persist_license_configs() -> dict[str, Any]:
         return {"total_seats": 0, "config_count": 0, "by_tier": {},
                 "note": parsed.get("note", "no licenseConfigs returned")}
 
-    # Persist via MERGE (update-or-insert)
+    # Persist via MERGE (update-or-insert). Parameterize BOTH k and v —
+    # k comes from GE license API response (Google-owned so low practical
+    # risk, but defensive is one extra ScalarQueryParameter).
     def _merge(k: str, v: str) -> None:
         _bq.query(
             f"""
             MERGE `{PROJECT}.{DATASET}.quota_config` t
-            USING (SELECT '{k}' k, @v v) s
+            USING (SELECT @k k, @v v) s
             ON t.key = s.k
             WHEN MATCHED THEN UPDATE SET value = s.v, updated_at = CURRENT_TIMESTAMP(),
                                           updated_by = 'license-api'
@@ -106,7 +121,10 @@ def _fetch_and_persist_license_configs() -> dict[str, Any]:
               VALUES (s.k, s.v, CURRENT_TIMESTAMP(), 'license-api')
             """,
             job_config=bigquery.QueryJobConfig(
-                query_parameters=[bigquery.ScalarQueryParameter("v", "STRING", v)]
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("k", "STRING", k),
+                    bigquery.ScalarQueryParameter("v", "STRING", v),
+                ]
             ),
         ).result()
     _merge("license.total_seats", str(parsed["total_seats"]))
@@ -129,16 +147,59 @@ def refresh_seats() -> dict[str, Any]:
         raise HTTPException(500, f"seat refresh failed: {e}")
 
 
+def _refresh_one_view(view_name: str, triggered_by: str) -> dict[str, Any]:
+    """Refresh a single s_* snapshot from its v_* view. Parameterises
+    triggered_by (previously an f-string interpolation — user-controllable
+    param, R1 challenge finding 2026-07-08). Returns per-snapshot summary."""
+    import time
+    snap = snapshot_name(view_name)
+    start = time.time()
+    try:
+        _bq.query(
+            f"CREATE OR REPLACE TABLE `{PROJECT}.{DATASET}.{snap}` AS "
+            f"SELECT * FROM `{PROJECT}.{DATASET}.{view_name}`"
+        ).result()
+        dur = time.time() - start
+        cnt_job = _bq.query(
+            f"SELECT COUNT(*) c FROM `{PROJECT}.{DATASET}.{snap}`"
+        ).result()
+        row_count = next(iter(cnt_job)).c
+        # Parameterized INSERT — triggered_by is user input, must not be
+        # concatenated. snap / view_name are internal constants (fine).
+        _bq.query(
+            f"INSERT INTO `{PROJECT}.{DATASET}.snapshot_meta` "
+            f"(snapshot_name, source_view, refreshed_at, row_count, "
+            f"refresh_seconds, triggered_by) "
+            f"VALUES ('{snap}', '{view_name}', CURRENT_TIMESTAMP(), "
+            f"{row_count}, {dur:.3f}, @triggered_by)",
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("triggered_by", "STRING", triggered_by),
+                ]
+            ),
+        ).result()
+        return {"snapshot": snap, "row_count": row_count,
+                "seconds": round(dur, 2), "ok": True}
+    except Exception as e:
+        log.error("refresh unexpected failure: %s — %s", snap, e)
+        return {"snapshot": snap, "ok": False, "error": str(e)[:200]}
+
+
 @router.post("/api/refresh")
 def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
-    """Re-materialize all snapshot tables. Returns per-table timing.
+    """Re-materialize all snapshot tables in parallel. Returns per-table timing.
 
     On fresh deploys, some v_* views won't exist yet (source log-sink
     tables haven't materialized). Pre-check INFORMATION_SCHEMA.VIEWS so
     we can skip missing views quietly instead of logging every one as
     an ERROR (they're expected transient state, not operational alarms).
+
+    Fans out via ThreadPoolExecutor — cuts wall time from ~60s serial
+    (21 views × 3 queries × ~1s) to max-single-view. Otherwise the
+    HTTP response times out before all views finish and the caller sees
+    500 despite work still completing in background.
     """
-    import time
+    import concurrent.futures
     # Pre-check: which v_* views actually exist right now?
     existing_views = {
         r.table_name
@@ -146,7 +207,8 @@ def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
             f"SELECT table_name FROM `{PROJECT}.{DATASET}.INFORMATION_SCHEMA.VIEWS`"
         ).result()
     }
-    results = []
+    results: list[dict[str, Any]] = []
+    to_refresh: list[str] = []
     for view_name in VIEWS:
         snap = snapshot_name(view_name)
         if view_name not in existing_views:
@@ -155,27 +217,17 @@ def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
             results.append({"snapshot": snap, "ok": False, "skipped": True,
                             "reason": f"view {view_name} does not exist"})
             continue
-        start = time.time()
-        try:
-            _bq.query(
-                f"CREATE OR REPLACE TABLE `{PROJECT}.{DATASET}.{snap}` AS "
-                f"SELECT * FROM `{PROJECT}.{DATASET}.{view_name}`"
-            ).result()
-            dur = time.time() - start
-            cnt_job = _bq.query(f"SELECT COUNT(*) c FROM `{PROJECT}.{DATASET}.{snap}`").result()
-            row_count = next(iter(cnt_job)).c
-            _bq.query(
-                f"INSERT INTO `{PROJECT}.{DATASET}.snapshot_meta` "
-                f"(snapshot_name, source_view, refreshed_at, row_count, refresh_seconds, triggered_by) "
-                f"VALUES ('{snap}', '{view_name}', CURRENT_TIMESTAMP(), {row_count}, {dur:.3f}, '{triggered_by}')"
-            ).result()
-            results.append({"snapshot": snap, "row_count": row_count, "seconds": round(dur, 2), "ok": True})
-        except Exception as e:
-            # Real unexpected error (SQL syntax, permission, quota, …).
-            # Missing-view case is caught by the pre-check above and logged
-            # at INFO — this branch keeps ERROR for genuine problems.
-            log.error("refresh unexpected failure: %s — %s", snap, e)
-            results.append({"snapshot": snap, "ok": False, "error": str(e)[:200]})
+        to_refresh.append(view_name)
+
+    # Parallel fan-out. BQ handles concurrent CREATE OR REPLACE fine —
+    # bounded workers to keep slot usage sane on shared reservations.
+    if to_refresh:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(10, len(to_refresh))
+        ) as pool:
+            for r in pool.map(lambda v: _refresh_one_view(v, triggered_by), to_refresh):
+                results.append(r)
+
     # Also refresh live licenseConfigs so seat panel stays current.
     seats: dict[str, Any]
     try:

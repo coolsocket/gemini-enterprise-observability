@@ -27,6 +27,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from google.cloud import bigquery
+
 from apps.api.shared.infrastructure.bq_client import bq as _bq, PROJECT, DATASET
 from apps.api.shared.common import _json_safe
 
@@ -49,13 +51,24 @@ def quota_config_set(key: str, value: str, by: str = "manual") -> dict[str, Any]
     if not (key.startswith("tier.") or key.startswith("quota.")
             or key in {"purchased_seats", "claimed_window_days"}):
         raise HTTPException(400, "key must start with 'tier.' / 'quota.' or be a legacy key")
+    # Parameterize all three inputs. The prefix guard on `key` does NOT
+    # prevent SQL injection — a payload like `tier.foo'; DROP TABLE ...`
+    # still passes startswith("tier."). Bind via ScalarQueryParameter so
+    # BQ treats them as literals.
     _bq.query(
         f"MERGE `{PROJECT}.{DATASET}.quota_config` t "
-        f"USING (SELECT '{key}' k, '{value}' v) s "
+        f"USING (SELECT @key k, @value v) s "
         f"ON t.key = s.k "
-        f"WHEN MATCHED THEN UPDATE SET value=s.v, updated_at=CURRENT_TIMESTAMP(), updated_by='{by}' "
+        f"WHEN MATCHED THEN UPDATE SET value=s.v, updated_at=CURRENT_TIMESTAMP(), updated_by=@by "
         f"WHEN NOT MATCHED THEN INSERT (key, value, updated_at, updated_by) "
-        f"VALUES (s.k, s.v, CURRENT_TIMESTAMP(), '{by}')"
+        f"VALUES (s.k, s.v, CURRENT_TIMESTAMP(), @by)",
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("key",   "STRING", key),
+                bigquery.ScalarQueryParameter("value", "STRING", value),
+                bigquery.ScalarQueryParameter("by",    "STRING", by),
+            ]
+        ),
     ).result()
     return {"key": key, "value": value, "ok": True}
 
