@@ -88,9 +88,14 @@ LOG_NAME_TO_TABLE = {
 # race gap. MERGE-on-insertId handles the resulting dup rows.
 OVERLAP_WINDOW = dt.timedelta(hours=1)
 
-# Cloud Logging API rate limits: 60 requests/second/project. Back off with
-# a 1s, 2s, 4s, 8s progression on 429 (then give up).
-MAX_BACKOFF_RETRIES = 4
+# Cloud Logging API rate limits: 60 requests/second/project (soft) but
+# in practice hits 429 much sooner on long paginated reads. Two defences:
+#   1. Always-on inter-page delay (INTER_PAGE_SLEEP_SEC) — self-paces to
+#      well below the quota (~10 pages/sec = 600 pages/min = well under
+#      the 3600 requests/min ceiling).
+#   2. 429 backoff — 6 retries with exponential + jitter, up to ~2min/hit.
+MAX_BACKOFF_RETRIES = 6
+INTER_PAGE_SLEEP_SEC = 0.1
 
 
 # ============================================================
@@ -143,6 +148,9 @@ def _read_all_entries(token: str, project: str, filter_expr: str) -> Iterable[di
         page_token = payload.get("nextPageToken")
         if not page_token:
             return
+        # Self-pace to stay comfortably below the API quota. See MAX_...
+        # comment for reasoning.
+        time.sleep(INTER_PAGE_SLEEP_SEC)
 
 
 # ============================================================
@@ -167,20 +175,69 @@ def _sink_min_ts(bq: bigquery.Client, project: str, dataset: str) -> dt.datetime
 
 
 def _stage_and_merge(bq: bigquery.Client, project: str, dataset: str,
-                     table: str, entries: list[dict[str, Any]]) -> int:
+                     table: str, entries: list[dict[str, Any]],
+                     schema_source: str | None = None) -> int:
     """Load a batch of entries into a staging table, then MERGE INTO
-    the sink target on insertId. Returns number of rows inserted (new)."""
+    the sink target on insertId. Returns number of rows inserted (new).
+
+    schema_source: optional `project.dataset.table` to copy schema from.
+    In production the sink target itself IS the source. In test rigs
+    where target is empty, point at a reference table with the true
+    sink schema (or leave None → autodetect + tolerance fallback)."""
     if not entries:
         return 0
     stage_id = f"{project}.{dataset}.{table}__backfill_stage"
-    # bq load JSON with schema autodetect handles nested payload shapes.
+    target_id = f"{project}.{dataset}.{table}"
+
+    # 1. Load into stage. Prefer explicit schema from a known-good
+    # reference table (real sink target); fall back to autodetect
+    # + max tolerance if none available.
     job_config = bigquery.LoadJobConfig(
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-        autodetect=True,
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        ignore_unknown_values=True,
+        max_bad_records=100_000,
     )
-    # Cloud Logging API returns camelCase JSON that bq load can ingest.
-    ndjson = "\n".join(json.dumps(e) for e in entries)
+    from google.api_core.exceptions import NotFound as _NF
+    if schema_source:
+        try:
+            ref = bq.get_table(schema_source)
+            job_config.schema = ref.schema
+            print(f"  → using schema from {schema_source}")
+        except _NF:
+            job_config.autodetect = True
+            print(f"  → schema source {schema_source} absent; autodetect fallback")
+    else:
+        # Try target itself (production case — sink already created it)
+        try:
+            ref = bq.get_table(target_id)
+            job_config.schema = ref.schema
+        except _NF:
+            job_config.autodetect = True
+    # Guard per-entry json.dumps + strip `@`-prefixed keys (BQ column names
+    # must match [A-Za-z_][A-Za-z0-9_]*; `@type` in protoPayload violates
+    # this and the whole load 400s). Also strip empty structs which can
+    # confuse autodetect.
+    def _sanitize(v: Any) -> Any:
+        if isinstance(v, dict):
+            return {
+                k.lstrip("@") or "type": _sanitize(vv)
+                for k, vv in v.items() if vv is not None and vv != {}
+            }
+        if isinstance(v, list):
+            return [_sanitize(x) for x in v if x is not None]
+        return v
+
+    ok_lines: list[str] = []
+    dumps_fail = 0
+    for e in entries:
+        try:
+            ok_lines.append(json.dumps(_sanitize(e), default=str))
+        except Exception:
+            dumps_fail += 1
+    if dumps_fail:
+        print(f"  ⚠ {dumps_fail} entries not JSON-serialisable, skipped before load")
+    ndjson = "\n".join(ok_lines)
     load_job = bq.load_table_from_file(
         file_obj=_wrap_bytes(ndjson.encode()),
         destination=stage_id,
@@ -188,9 +245,19 @@ def _stage_and_merge(bq: bigquery.Client, project: str, dataset: str,
     )
     load_job.result()
 
-    # MERGE stage into target on insertId (guaranteed unique per entry).
-    # WHEN NOT MATCHED → INSERT — never touches existing rows.
-    target_id = f"{project}.{dataset}.{table}"
+    # 2. Bootstrap: create empty target if it doesn't exist (fresh sink).
+    #    Uses stage's schema — subsequent runs' stages will have the SAME
+    #    schema (same JSON shape, same autodetect), so MERGE is stable.
+    from google.api_core.exceptions import NotFound
+    try:
+        bq.get_table(target_id)
+    except NotFound:
+        bq.query(
+            f"CREATE TABLE `{target_id}` AS SELECT * FROM `{stage_id}` WHERE FALSE"
+        ).result()
+
+    # 3. MERGE stage into target on insertId (guaranteed unique per entry).
+    #    WHEN NOT MATCHED → INSERT — never touches existing rows.
     merge_sql = f"""
     MERGE `{target_id}` t
     USING `{stage_id}` s
@@ -201,7 +268,7 @@ def _stage_and_merge(bq: bigquery.Client, project: str, dataset: str,
     merge_job.result()
     inserted = merge_job.num_dml_affected_rows or 0
 
-    # Cleanup stage
+    # 4. Cleanup stage
     bq.delete_table(stage_id, not_found_ok=True)
     return inserted
 
@@ -223,6 +290,15 @@ def main() -> int:
     # test scenarios where BQ dataset lives in a different project than
     # the log-source project (e.g. sandbox demo mirror).
     source_project = os.environ.get("SOURCE_PROJECT", project)
+    # In prod, jobs are billed to the same project that owns the dataset.
+    # In test setups where the operator has jobUser on a DIFFERENT project
+    # (e.g. cloud-llm-preview1 quota project) than the target dataset,
+    # split via BILLING_PROJECT. Load/MERGE still write to PROJECT.DATASET.
+    billing_project = os.environ.get("BILLING_PROJECT", project)
+    # Optional reference dataset to source schemas from (test rigs where
+    # target is empty). Format: `project.dataset`. Each of the 5 sink tables
+    # is looked up as {SCHEMA_SOURCE_DATASET}.{table_name} to get schema.
+    schema_source_ds = os.environ.get("SCHEMA_SOURCE_DATASET")
     if not project or not dataset:
         print("ERROR: PROJECT= and DATASET= env vars required", file=sys.stderr)
         return 2
@@ -231,7 +307,10 @@ def main() -> int:
     creds, _ = _google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     creds.refresh(_AuthRequest())
     token = creds.token
-    bq = bigquery.Client(project=project)
+    # BQ Client's `project` = "job project" (where jobs.create is authorised);
+    # destination tables can live in ANOTHER project. In prod both are the
+    # tenant's own project; in test rigs they can split.
+    bq = bigquery.Client(project=billing_project)
 
     # 1. Detect sink cutoff (empirical MIN over target tables).
     sink_min = _sink_min_ts(bq, project, dataset)
@@ -278,7 +357,8 @@ def main() -> int:
     for table, entries in buckets.items():
         if not entries:
             continue
-        inserted = _stage_and_merge(bq, project, dataset, table, entries)
+        schema_src = f"{schema_source_ds}.{table}" if schema_source_ds else None
+        inserted = _stage_and_merge(bq, project, dataset, table, entries, schema_src)
         print(f"  ✓ {table}: fetched={len(entries)}  new_after_dedup={inserted}")
         total_inserted += inserted
 

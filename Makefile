@@ -342,3 +342,10 @@ all: install deploy-infra
 	@echo ""
 	@echo "Web+py deps installed and Phase A deploy done. Read the message above"
 	@echo "for the manual GE Console step before running 'make deploy-views'."
+
+# End-to-end test of `make backfill` — creates a fresh dataset, runs
+# backfill twice (bootstrap + idempotency), verifies row counts.
+# See infra/contexts/deploy/application/e2e_backfill.sh for details.
+# Usage: make e2e-backfill TARGET_PROJECT=<id> SOURCE_PROJECT=<id>
+e2e-backfill:
+	@bash infra/contexts/deploy/application/e2e_backfill.sh
