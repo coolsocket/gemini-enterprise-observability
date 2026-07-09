@@ -13,11 +13,16 @@ Assigned tiers are honored via the `user_tier` table (an admin action);
 seats not covered by an assignment fall back to `quota.default_tier`
 (typically `standard`).
 
-- **Parser (pure):** `apps/api/contexts/quota/domain/license_parse.py::parse_license_configs`
-- **Allocator (pure spec):** `apps/api/contexts/quota/domain/tier_allocation.py::allocate_seats`
-- **Persistence I/O:** `apps/api/routes/refresh.py::_fetch_and_persist_license_configs`
-- **Live SQL (production):** the tier-allocation math is also encoded in
-  `apps/api/views.sql.tmpl` (v_quota_totals / v_quota_utilization) so
-  dashboards can compute it in BigQuery without a round trip. The Python
-  `allocate_seats` is a reference implementation of the same logic —
-  keep them in sync when the invariant evolves.
+- **Code:** `apps/api/contexts/quota/domain/license_parse.py::parse_license_configs`
+  (pure parser) + `apps/api/contexts/quota/domain/tier_allocation.py::allocate_seats`
+  (pure Python reference spec) + `apps/api/routes/refresh.py::_fetch_and_persist_license_configs`
+  (I/O shell) + `infra/sql_templates/views.sql.tmpl` (`v_quota_totals` /
+  `v_quota_utilization` — production math also encoded here so dashboards
+  compute in BigQuery without a round trip)
+- **Test:** `tests/unit/test_quota_domain.py` (19 tests covering pure-fn
+  contracts, edge cases, overflow clamping, and the `sum == purchased`
+  property for the allocator)
+
+Note: the tier-allocation math is deliberately duplicated in Python and
+SQL. Python `allocate_seats` is the reference implementation; keep both
+in sync when the invariant evolves.

@@ -28,12 +28,14 @@ DEFAULT behavior surprises 90%+ of deployers. The default should
 be "everything co-located". Advanced users can opt into
 cross-region by setting BQ_LOCATION explicitly.
 
+- **Code:** `Makefile` (`BQ_LOCATION ?= $(REGION)`) + `.env.example` (commented out)
+- **Test:** `tests/unit/test_env_setup.py`
+
 ## INV-002: DTS service agent gets TokenCreator on dashboard SA
 
 If `enable_scheduled_refresh = true`, terraform MUST grant
 `roles/iam.serviceAccountTokenCreator` on `google_service_account.dashboard_sa`
 to `service-<project_number>@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com`.
-Test: `tests/unit/test_scheduled_refresh_iam.py`.
 
 **Violation shape**: fresh deploy sets `enable_scheduled_refresh = true`.
 Terraform apply succeeds, but the first scheduled refresh fails with
@@ -46,6 +48,9 @@ create (a) the DTS service agent via `google_project_service_identity`
 and (b) the `google_service_account_iam_member` grant. Both are
 gated on `enable_scheduled_refresh` so operators who only use manual
 `POST /api/refresh` don't pay for these extra IAM resources.
+
+- **Code:** `terraform/main.tf` (`google_service_account_iam_member.dts_token_creator`)
+- **Test:** `tests/unit/test_scheduled_refresh_iam.py`
 
 ## INV-deploy-backfill: historical log import is idempotent + gap-free
 
@@ -68,8 +73,7 @@ can run it any number of times without harm:
    remain byte-identical (after `{project_id}` substitution) to the
    filter installed in terraform's `google_logging_project_sink`
    resource. Any drift means backfill fetches a different subset than
-   the sink stores. Locked by
-   `tests/unit/test_backfill.py::test_backfill_filter_matches_terraform_sink`.
+   the sink stores.
 
 **Violation shape**: without insertId MERGE, a re-run of `make backfill`
 would double every row in the target tables — dashboards would show
@@ -82,13 +86,15 @@ of backfill coverage inconsistently — some boundary entries drop.
 - Bounded by exclusion filters on `_Default` — if org policy excludes
   discoveryengine logs, backfill will report 0 fetched (as it should)
 - Bounded by Cloud Logging API rate limits (60 req/sec/project) —
-  backfill.py handles 429 with exponential backoff (up to 4 retries)
+  backfill.py handles 429 with exponential backoff (up to 6 retries)
+
+- **Code:** `infra/contexts/deploy/application/backfill.py`
+- **Test:** `tests/unit/test_backfill.py`
 
 ## INV-003: snapshot_refresh.sql.tftpl view list ⊆ views.sql.tmpl definitions
 
 Every `v_*` that the scheduled query references in a `FROM` clause MUST
 also be defined by `CREATE OR REPLACE VIEW` in `infra/sql_templates/views.sql.tmpl`.
-Test: `tests/unit/test_snapshot_tftpl_view_drift.py`.
 
 **Violation shape**: someone adds `s_foo` to the tftpl during a demo,
 forgets to add the underlying view definition, ships it. Next
@@ -98,3 +104,6 @@ live in different directories and drift silently.
 **Correct behavior**: static test asserts subset relationship. To add
 a new snapshot, add its view definition FIRST, verify it, then add
 the `CREATE OR REPLACE TABLE ... AS SELECT * FROM v_new` line.
+
+- **Code:** `terraform/snapshot_refresh.sql.tftpl` + `infra/sql_templates/views.sql.tmpl`
+- **Test:** `tests/unit/test_snapshot_tftpl_view_drift.py`

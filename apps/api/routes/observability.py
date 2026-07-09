@@ -49,8 +49,20 @@ router = APIRouter()
 def _rows(view: str, limit: int = 1000, origin: Optional[str] = None,
           engine_id: Optional[str] = None, live: bool = False,
           since_hours: Optional[int] = None) -> list[dict[str, Any]]:
-    # Pure param validation + WHERE assembly happens in the domain layer;
-    # only the BQ call + snapshot-miss recovery live here (see INV-obs-001).
+    """Load view data via 3-tier resolution (snapshot → live fallback → []).
+
+    Load-bearing centre of the /api/v/{view} path. Delegates parameter
+    validation + WHERE construction to the domain layer (build_query_spec).
+    Two NotFound cases both degrade gracefully (INV-obs-001 + INV-obs-004):
+
+      1. snapshot missing (fresh deploy, first-hour after apply_views) →
+         retry against the live v_* view.
+      2. live view ALSO missing (view is in registry but not yet defined,
+         or upstream log-sink tables absent) → return [] with a warning
+         log so /api/v/xxx never 500s on the user.
+
+    Never raises for the "no data" case; caller can distinguish via
+    len(rows) == 0 vs a proper HTTPException on genuine errors."""
     try:
         spec = build_query_spec(
             PROJECT, DATASET, view,
@@ -95,6 +107,9 @@ def _rows(view: str, limit: int = 1000, origin: Optional[str] = None,
 def view_rows(view: str, limit: int = 1000, origin: Optional[str] = None,
               engine_id: Optional[str] = None, live: bool = False,
               since_hours: Optional[int] = None) -> JSONResponse:
+    """Generic view reader. `?live=true` bypasses snapshots; `?origin=HUMAN`
+    filters to real users; `?engine_id=X` scopes to one engine; `?since_hours=N`
+    windows recent rows (capped at MAX_SINCE_HOURS)."""
     rows = _rows(view, limit=limit, origin=origin, engine_id=engine_id,
                  live=live, since_hours=since_hours)
     return JSONResponse(

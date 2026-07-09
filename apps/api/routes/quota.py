@@ -47,6 +47,21 @@ def quota_config_get() -> dict[str, Any]:
 
 @router.post("/api/quota/config")
 def quota_config_set(key: str, value: str, by: str = "manual") -> dict[str, Any]:
+    """MERGE-update a single row of quota_config. Frontend edit-in-place
+    calls this per keystroke on the /quota page's editable cells.
+
+    All three args are user-controlled → bound as bigquery.ScalarQueryParameter
+    (the startswith("tier.") prefix guard does NOT prevent SQL injection —
+    a payload `tier.foo'; DROP TABLE ...` still passes). See R2 challenge
+    findings (commit 2f7f530) for the injection-safe rewrite.
+
+    Args:
+        key: MUST start with `tier.` / `quota.` OR be one of the legacy
+             keys `purchased_seats` / `claimed_window_days`. Rejected otherwise.
+        value: opaque string; interpreted by consumer (view SQL casts to INT64
+               for daily limits, keeps as STRING for enums).
+        by: attribution ("manual" from CLI, "ui" from frontend edit).
+    """
     # Allow any key that starts with 'tier.' / 'quota.' / legacy purchased_seats / claimed_window_days
     if not (key.startswith("tier.") or key.startswith("quota.")
             or key in {"purchased_seats", "claimed_window_days"}):

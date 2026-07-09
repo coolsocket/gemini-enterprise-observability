@@ -110,6 +110,9 @@ def _fetch_and_persist_license_configs() -> dict[str, Any]:
     # k comes from GE license API response (Google-owned so low practical
     # risk, but defensive is one extra ScalarQueryParameter).
     def _merge(k: str, v: str) -> None:
+        """MERGE a single quota_config key. Update semantics:
+        WHEN MATCHED → overwrite (this is authoritative license data,
+        NOT admin-editable tier defaults which use WHEN NOT MATCHED)."""
         _bq.query(
             f"""
             MERGE `{PROJECT}.{DATASET}.quota_config` t
@@ -247,6 +250,11 @@ def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
 # `@router.on_event(...)` doesn't fire for included routers.
 # ============================================================
 async def _start_seat_refresh_loop() -> None:
+    """FastAPI lifespan hook. Kicks a background task that re-pulls
+    licenseConfigs every LICENSE_REFRESH_INTERVAL_SEC (24h default).
+    Set the env var to 0 to disable — POST /api/refresh/seats still
+    triggers on-demand. Returns immediately; the loop runs forever
+    inside `_loop()` via asyncio.create_task."""
     if LICENSE_REFRESH_INTERVAL_SEC <= 0:
         log.info("seat auto-refresh disabled (LICENSE_REFRESH_INTERVAL_SEC=0)")
         return
