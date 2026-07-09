@@ -2,9 +2,15 @@
 
 > **语言**: 中文 · [English](./README.md)
 
-[![在 Cloud Shell 中打开](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fcoolsocket%2Fgemini-enterprise-observability&cloudshell_git_branch=main&cloudshell_workspace=.&cloudshell_tutorial=docs%2FDEPLOYMENT.zh-CN.md&show=terminal)
+[![在 Cloud Shell 中打开](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fcoolsocket%2Fgemini-enterprise-observability&cloudshell_git_branch=main&cloudshell_workspace=.&cloudshell_tutorial=docs%2FTUTORIAL.zh-CN.md&show=ide%2Cterminal)
 
-**推荐安装路径** —— 点上面的按钮。Cloud Shell 会自动用你 Google 账号 auth、预 clone 好仓库、预装 `gcloud` / `terraform` / `python3` / `npm`。然后在终端里:
+**推荐安装路径** —— 点上面按钮。Cloud Shell 会:
+- 自动用你 Google 账号 auth
+- 预 clone 好仓库到编辑器里
+- **右边弹出一个交互式教程面板**,一步步引导:选 project → 一键开 API → wizard → deploy → backfill → serve
+- 预装好 `gcloud` / `terraform` / `python3` / `npm`
+
+跟着右边教程面板走,大约 30 分钟。如果你更想在自己本机手工跑:
 
 ```bash
 make install         # venv + npm 依赖 + 复制 .env.example → .env + doctor 报告

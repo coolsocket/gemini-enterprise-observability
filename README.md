@@ -2,9 +2,15 @@
 
 > **Language**: English · [中文](./README.zh-CN.md)
 
-[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fcoolsocket%2Fgemini-enterprise-observability&cloudshell_git_branch=main&cloudshell_workspace=.&cloudshell_tutorial=docs%2FDEPLOYMENT.md&show=terminal)
+[![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fcoolsocket%2Fgemini-enterprise-observability&cloudshell_git_branch=main&cloudshell_workspace=.&cloudshell_tutorial=docs%2FTUTORIAL.md&show=ide%2Cterminal)
 
-**Recommended install path** — click the button above. Cloud Shell opens with your Google-account auth already active, our repo pre-cloned, and `gcloud` / `terraform` / `python3` / `npm` pre-installed. Then in the terminal:
+**Recommended install path** — click the button above. Cloud Shell opens with:
+- Your Google-account auth already active
+- Our repo cloned in the editor
+- An **interactive step-by-step tutorial panel** on the right that walks you through project selection → API enable → wizard → deploy → backfill → serve
+- `gcloud` / `terraform` / `python3` / `npm` pre-installed
+
+Follow the tutorial panel; ~30 minutes end-to-end. If you'd rather run it manually in your own terminal:
 
 ```bash
 make install         # venv + npm deps + copies .env.example → .env + doctor report
