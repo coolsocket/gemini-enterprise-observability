@@ -32,7 +32,7 @@
 | 设 discoveryengine 的 audit-config (authoritative) | `resourcemanager.projects.setIamPolicy` (同上) | `roles/resourcemanager.projectIamAdmin` |
 | 建 Cloud Run service (`deploy_cloud_run = true` 时) | `run.services.create` | `roles/run.admin` |
 
-**最简单答案:项目 `roles/owner`。** 组织不让给 Owner 就把上面 7 个 composite 都授给部署方。缺任何一个 `terraform apply` 会在中途 403,需要 [`make tf-import-orphans`](../TROUBLESHOOTING.zh-CN.md) 恢复。
+**最简单答案:项目 `roles/owner`。** 组织不让给 Owner 就把上面 7 个 composite 都授给部署方。缺任何一个 `terraform apply` 会在中途 403,需要 [`make tf-import-orphans`](./TROUBLESHOOTING.zh-CN.md) 恢复。
 
 **认证 (两个都要)**
 - `gcloud auth login` —— Terraform + Cloud Build CLI 用

@@ -1,6 +1,7 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
         tf-init tf-plan tf-apply tf-import-orphans preflight views bootstrap image \
-        deploy-infra deploy-views deploy resume doctor wizard test hotfix backfill all clean
+        deploy-infra deploy-views deploy resume doctor wizard test hotfix backfill \
+        e2e-backfill check-project all clean
 
 # Auto-include per-project config from .env (if present) and export every
 # variable to subprocesses (uvicorn / terraform / gcloud). Users
@@ -63,9 +64,13 @@ py-deps:
 	fi
 
 web-install:
-	cd apps/web && npm install --silent --no-audit --no-fund
+	@if [ ! -d apps/web/node_modules ]; then \
+	  cd apps/web && npm install --silent --no-audit --no-fund; \
+	fi
 
-web-build:
+# Depend on web-install so fresh clones (Cloud Shell tutorial's `make serve`
+# entry point) don't crash with `vite: not found` when node_modules is absent.
+web-build: web-install
 	cd apps/web && npm run build
 
 # main.py reads BQ_PROJECT/BQ_DATASET/SIM_PREFIX at import time — need to

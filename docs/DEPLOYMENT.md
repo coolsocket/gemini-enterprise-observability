@@ -32,7 +32,7 @@ Before you start, make sure you have all of these:
 | Set audit-config for discoveryengine (authoritative) | `resourcemanager.projects.setIamPolicy` (same) | `roles/resourcemanager.projectIamAdmin` |
 | Create Cloud Run service (if `deploy_cloud_run = true`) | `run.services.create` | `roles/run.admin` |
 
-**The single easy answer** is `roles/owner` on the project. If your org doesn't allow that, grant all seven of the composites above to the deploying principal. Missing any one of them causes `terraform apply` to fail partway with `403 Permission denied on resource ...` and you'll need [`make tf-import-orphans`](../TROUBLESHOOTING.md#terraform-apply-fails-with-error-409-already-exists-on-the-second-run) to recover the partial state.
+**The single easy answer** is `roles/owner` on the project. If your org doesn't allow that, grant all seven of the composites above to the deploying principal. Missing any one of them causes `terraform apply` to fail partway with `403 Permission denied on resource ...` and you'll need [`make tf-import-orphans`](./TROUBLESHOOTING.md#terraform-apply-fails-with-error-409-already-exists-on-the-second-run) to recover the partial state.
 
 **Authentication (both required)**
 - `gcloud auth login` — for the Terraform + Cloud Build CLIs

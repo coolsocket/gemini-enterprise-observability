@@ -24,11 +24,11 @@ Everything the dashboard surfaces is grounded in what GE actually emits. These a
 
 ### API — what a service account can't do
 
-9. **NotebookLM API is blocked for service accounts.** Even with a custom role granting all `discoveryengine.notebooks.*` permissions, SA calls return `403 "The caller does not have permission"`. The gate is at the NotebookLM service layer (workforce identity + Regional Access Boundary registry), not IAM. Attempting to bind the role surfaces this as a `Regional Access Boundary HTTP request failed... Account not found for email: <hash>|<user>` warning — cosmetic (the binding still succeeds) but signals the underlying gate. Full evidence: [`playground/de-api-probe/notebooklm-sa-gate.md`](./playground/de-api-probe/notebooklm-sa-gate.md).
+9. **NotebookLM API is blocked for service accounts.** Even with a custom role granting all `discoveryengine.notebooks.*` permissions, SA calls return `403 "The caller does not have permission"`. The gate is at the NotebookLM service layer (workforce identity + Regional Access Boundary registry), not IAM. Attempting to bind the role surfaces this as a `Regional Access Boundary HTTP request failed... Account not found for email: <hash>|<user>` warning — cosmetic (the binding still succeeds) but signals the underlying gate. Full evidence: [`playground/de-api-probe/notebooklm-sa-gate.md`](../playground/de-api-probe/notebooklm-sa-gate.md).
 
 10. **Deep Research REST API is blocked for SAs.** `AsyncAssist` doesn't exist in the public `v1alpha` Discovery Engine schema — it's UI-internal (`v1main`) and gated by the same workforce-identity check. SAs cannot submit DR programmatically. Existing DR from real users IS observable via audit log; we just can't generate it from code.
 
-11. **Generated files can't be downloaded via API.** `StreamAssist` will happily produce an image (Nano Banana 2) or video and return a `fileId` in the stream response, but the download endpoints (`sessions/{sid}:listFiles`, `:getFile`, `:downloadFile`) all return `403 "Session is not owned by the provided user"` — same workforce gate. Files are only accessible in the GE UI. Full evidence: [`playground/ge-generation-probe/FINDINGS.md`](./playground/ge-generation-probe/FINDINGS.md).
+11. **Generated files can't be downloaded via API.** `StreamAssist` will happily produce an image (Nano Banana 2) or video and return a `fileId` in the stream response, but the download endpoints (`sessions/{sid}:listFiles`, `:getFile`, `:downloadFile`) all return `403 "Session is not owned by the provided user"` — same workforce gate. Files are only accessible in the GE UI. Full evidence: [`playground/ge-generation-probe/FINDINGS.md`](../playground/ge-generation-probe/FINDINGS.md).
 
 12. **Deep Research vs Search vs grounded-answer are distinct services.** DR = `AssistantService.AsyncAssist`, Search API = `SearchService.Search`, grounded-answer = `ConversationalSearchService.GetAnswer`. Our counters keep them in separate buckets; DR is never conflated with Search.
 
@@ -36,7 +36,7 @@ Everything the dashboard surfaces is grounded in what GE actually emits. These a
 
 13. **GE engine must be pre-provisioned.** This repo observes an existing GE deployment; it doesn't create one. Provision the engine in GE Admin Console first.
 
-14. **GE Console toggles are mostly automated** (2026-07-06). `bootstrap.py` now `PATCH`es each engine's `observabilityConfig` field via the Discovery Engine API — `observabilityEnabled` (OpenTelemetry) + `sensitiveLoggingEnabled` (Prompt & Response Logging) flip on automatically. Only **"Enable Feedback"** still requires a manual click in GE Admin Console. Set `SKIP_OBSERVABILITY=true make bootstrap` to opt out of the automation. See [`docs/GE_CONSOLE_SETUP.md`](./docs/GE_CONSOLE_SETUP.md).
+14. **GE Console toggles are mostly automated** (2026-07-06). `bootstrap.py` now `PATCH`es each engine's `observabilityConfig` field via the Discovery Engine API — `observabilityEnabled` (OpenTelemetry) + `sensitiveLoggingEnabled` (Prompt & Response Logging) flip on automatically. Only **"Enable Feedback"** still requires a manual click in GE Admin Console. Set `SKIP_OBSERVABILITY=true make bootstrap` to opt out of the automation. See [`docs/GE_CONSOLE_SETUP.md`](./GE_CONSOLE_SETUP.md).
 
 15. **Sink target tables are lazy.** `cloudaudit_googleapis_com_data_access` and `discoveryengine_googleapis_com_*` are auto-created by BigQuery only when the first matching sink row arrives. `make deploy-views` reports which are still waiting and is idempotent — re-run once traffic flows.
 

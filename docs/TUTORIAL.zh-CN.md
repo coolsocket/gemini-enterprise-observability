@@ -26,7 +26,9 @@
 **你项目里必须已有**(这个教程不会帮你搞这些):
 - 已启用计费
 - 已经跑起来一个 Gemini Enterprise engine
-- 你有 Owner 或 [DEPLOYMENT 里列的复合角色](docs/DEPLOYMENT.zh-CN.md)
+- 你有 Owner 或 [DEPLOYMENT 里列的复合角色](./DEPLOYMENT.zh-CN.md)。
+  Backfill(第 7 步)还需要 `roles/logging.privateLogViewer` 才能读
+  `_Default` bucket 里的 audit 日志。
 
 点右下角 **Start** 开始 →
 

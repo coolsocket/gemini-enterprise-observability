@@ -29,7 +29,9 @@ You'll:
 - Billing enabled
 - A Gemini Enterprise engine already provisioned
 - Your account has Owner or the composite roles listed in
-  [DEPLOYMENT.md prereqs](docs/DEPLOYMENT.md)
+  [DEPLOYMENT.md prereqs](./DEPLOYMENT.md). Backfill (step 7) additionally
+  needs `roles/logging.privateLogViewer` on this project to read audit
+  logs from the `_Default` bucket.
 
 Click **Start** →
 
