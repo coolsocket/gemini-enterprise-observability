@@ -170,7 +170,25 @@ export default function Conversations() {
         >
           {q.isLoading ? <EmptyState title="加载中…" /> :
            filtered.length === 0 ? (
-            <EmptyState title="没有会话" hint={filter !== "all" ? "改 filter 试试" : "等待 chat 流量"} />
+            <EmptyState
+              title="没有会话"
+              hint={filter !== "all" ? "改 filter 试试" : (
+                <>
+                  没数据通常有两个原因:
+                  <ol className="list-decimal list-inside mt-1 space-y-0.5 text-left">
+                    <li>还没有流量(等一等 GE 侧发生 chat)</li>
+                    <li><b>GE Console 里 Prompt &amp; Response Logging 没打开</b> ——
+                      没开的话 prompt/response text 上游根本没被记录,BigQuery 里就无数据。
+                      去 GE Admin Console → 每个 engine → Settings → Observability
+                      → 打开 Prompt &amp; Response Logging(参考{" "}
+                      <code className="bg-subtle px-1 rounded">docs/GE_CONSOLE_SETUP.md</code>)。
+                      历史 chat 内容无法追回(源头没记), <code>make backfill</code> 也捞不到 ——
+                      只有开启后的新 chat 才有内容。
+                    </li>
+                  </ol>
+                </>
+              )}
+            />
           ) : (
             <ul className="divide-y divide-border-subtle/40 -m-5 max-h-[700px] overflow-y-auto">
               {filtered.map((s) => {

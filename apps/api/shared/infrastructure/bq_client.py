@@ -42,6 +42,49 @@ if not PROJECT:
         "Set it in .env or on the command line — see docs/DEPLOYMENT.md."
     )
 
+# --- HTTP pool config ---
+# Default urllib3 pool_maxsize=10 → saturated by user_deep_dive
+# (~15 concurrent BQ queries via ThreadPoolExecutor) and refresh_now
+# (~10 concurrent). Symptom is a log-noise flood:
+#   WARNING:urllib3.connectionpool:Connection pool is full,
+#   discarding connection: bigquery.googleapis.com. Connection pool size: 10
+# Beyond the noise, discarding forces reconnects → latency on each extra.
+#
+# Two mitigations, together:
+#  1) Bump every requests.HTTPAdapter's default pool to 32 (belt).
+#     Fixes the case where google-auth / google-cloud-bigquery honour
+#     the requests adapter default.
+#  2) Silence the specific urllib3 warning (suspenders). Some code paths
+#     inside google-cloud-bigquery / google-auth create urllib3
+#     PoolManagers directly (bypassing requests.HTTPAdapter), so (1)
+#     alone can't cover them. Silencing keeps operator logs clean —
+#     any latency hit from actual pool exhaustion is capped by our
+#     concurrency limits in the routes (see MAX_WORKERS_PER_ROUTE).
+import logging
+import requests.adapters  # noqa: E402
+_orig_httpadapter_init = requests.adapters.HTTPAdapter.__init__
+def _bumped_httpadapter_init(self, pool_connections=10, pool_maxsize=10, *args, **kwargs):
+    _orig_httpadapter_init(
+        self,
+        pool_connections=max(pool_connections, 32),
+        pool_maxsize=max(pool_maxsize, 32),
+        *args, **kwargs,
+    )
+requests.adapters.HTTPAdapter.__init__ = _bumped_httpadapter_init  # type: ignore[method-assign]
+
+# Suspenders: silence the specific noisy warning. `raise_on_status` and
+# similar operational messages still propagate at WARNING; only the
+# pool-full noise gets filtered.
+class _PoolFullFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Connection pool is full" not in record.getMessage()
+logging.getLogger("urllib3.connectionpool").addFilter(_PoolFullFilter())
+
+# Concurrency ceiling. Routes fanning out multiple BQ queries in parallel
+# should cap ThreadPoolExecutor(max_workers=…) at this — keeps us below
+# the pool limit + prevents thundering-herd across other GCP services.
+MAX_WORKERS_PER_ROUTE: int = 8
+
 # --- singleton BQ client ---
 # ADC-based (google.auth.default under the hood). Same instance is reused
 # across all routes for connection pooling.

@@ -99,6 +99,24 @@ export default function DataAccess() {
 
   const [showTimeline, setShowTimeline] = useState(false);
 
+  // Serialise the summary rows as CSV. Escapes commas/quotes/newlines
+  // per RFC 4180. Streams a blob to a hidden anchor with `download` attr.
+  function downloadCSV(rows: DataAccessSummaryRow[] | undefined, filename: string) {
+    if (!rows || rows.length === 0) return;
+    const cols = Object.keys(rows[0]);
+    const esc = (v: unknown) => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const body = [cols.join(","), ...rows.map(r => cols.map(c => esc((r as Record<string, unknown>)[c])).join(","))].join("\n");
+    const blob = new Blob(["﻿" + body], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="space-y-4">
       {/* Hint */}
@@ -107,7 +125,18 @@ export default function DataAccess() {
         <div>⚠️ <b>Deep Research</b>（AsyncAssist / ReadAsyncAssist）只能看到<b>调用次数</b> — prompt + response 文本不被 gen_ai 日志记录（与 GE UI 路径同源限制）。要看原始 prompt 内容请去 GE 后台的 Deep Research 任务列表。</div>
       </div>
 
-      <Panel title={`谁查了什么 · 汇总 ${origin ? `· ${origin}` : ""}`}>
+      <Panel
+        title={`谁查了什么 · 汇总 ${origin ? `· ${origin}` : ""}`}
+        action={
+          <button
+            onClick={() => downloadCSV(summary.data?.rows, `data-access-summary-${new Date().toISOString().slice(0,10)}.csv`)}
+            disabled={!summary.data?.rows?.length}
+            className="h-7 px-3 rounded-md bg-subtle border border-border-subtle text-xs text-ink-secondary hover:text-ink-primary disabled:opacity-40"
+            title="Download CSV of current rows (respects your origin/engine/range filters)"
+          >
+            ⬇ Download CSV
+          </button>
+        }>
         {!summary.data ? <EmptyState title="加载中…" /> : (
           <DataTable rows={summary.data.rows} cols={summaryCols} filterKeys={["actor_email", "engine_display_name", "origin"]} />
         )}

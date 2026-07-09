@@ -665,8 +665,13 @@ export default function UserDeepDive() {
                   return (
                     <tr key={i} className="border-b border-border-subtle/20 hover:bg-subtle/30">
                       <td className="py-1 pr-3">
-                        <div className="text-ink-primary truncate max-w-[280px]" title={r.engine_id ?? ""}>
-                          {r.engine_display_name ?? r.engine_id ?? "—"}
+                        <div className="text-ink-primary truncate max-w-[280px]"
+                             title={r.engine_id ?? "cross-engine · admin API — 这类调用没有 engine 上下文(license / admin / cross-engine 管理面)"}>
+                          {r.engine_display_name ?? r.engine_id ?? (
+                            <span className="text-ink-muted italic">
+                              (cross-engine · admin API)
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className={`py-1 pr-3 text-right tabular-nums ${r.chat_turns > 0 ? "text-ggreen font-medium" : "text-ink-muted"}`}>{r.chat_turns || "—"}</td>

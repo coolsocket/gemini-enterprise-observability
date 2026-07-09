@@ -108,7 +108,10 @@ def quota_overview() -> JSONResponse:
         except Exception as e:
             log.warning(f"quota_overview {k} failed: {e}")
             return k, []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as pool:
+    from apps.api.shared.infrastructure.bq_client import MAX_WORKERS_PER_ROUTE
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(len(queries), MAX_WORKERS_PER_ROUTE)
+    ) as pool:
         out = dict(pool.map(run, queries.items()))
     # Also expose "today" in CA time so frontend knows what "today" means
     import datetime as _dt

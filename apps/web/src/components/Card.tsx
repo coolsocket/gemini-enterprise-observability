@@ -83,11 +83,12 @@ export function Panel({
   );
 }
 
-export function EmptyState({ title, hint }: { title: string; hint?: string }) {
+import type { ReactNode } from "react";
+export function EmptyState({ title, hint }: { title: string; hint?: ReactNode }) {
   return (
     <div className="py-12 text-center">
       <div className="text-ink-secondary text-sm">{title}</div>
-      {hint && <div className="text-ink-muted text-xs mt-1">{hint}</div>}
+      {hint && <div className="text-ink-muted text-xs mt-1 max-w-[600px] mx-auto">{hint}</div>}
     </div>
   );
 }

@@ -225,8 +225,9 @@ def refresh_now(triggered_by: str = "manual") -> dict[str, Any]:
     # Parallel fan-out. BQ handles concurrent CREATE OR REPLACE fine —
     # bounded workers to keep slot usage sane on shared reservations.
     if to_refresh:
+        from apps.api.shared.infrastructure.bq_client import MAX_WORKERS_PER_ROUTE
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(10, len(to_refresh))
+            max_workers=min(MAX_WORKERS_PER_ROUTE, len(to_refresh))
         ) as pool:
             for r in pool.map(lambda v: _refresh_one_view(v, triggered_by), to_refresh):
                 results.append(r)

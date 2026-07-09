@@ -363,7 +363,10 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
             log.warning(f"user_deep_dive: {key} failed: {e}")
             return key, []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as pool:
+    from apps.api.shared.infrastructure.bq_client import MAX_WORKERS_PER_ROUTE
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(len(queries), MAX_WORKERS_PER_ROUTE)
+    ) as pool:
         results = dict(pool.map(run_one, queries.items()))
 
     # Resolve full identity (including vendor: Okta / Azure / generic WIF)
