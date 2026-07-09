@@ -1,6 +1,6 @@
 .PHONY: install py-deps web-install web-build api-run serve dev tunnel-info \
         tf-init tf-plan tf-apply tf-import-orphans preflight views bootstrap image \
-        deploy-infra deploy-views deploy resume doctor wizard test hotfix all clean
+        deploy-infra deploy-views deploy resume doctor wizard test hotfix backfill all clean
 
 # Auto-include per-project config from .env (if present) and export every
 # variable to subprocesses (uvicorn / terraform / gcloud). Users
@@ -117,6 +117,25 @@ test: py-deps
 # just fire and log. `|| true` so the recipe never fails on a slow BQ
 # response (curl timeout != real error; snapshot refresh keeps running
 # in the background of the Python process).
+# One-shot historical log import — pulls Cloud Logging entries older
+# than sink coverage into the same sink target tables (MERGE ON insertId
+# so re-runs are noop and no rows dup). Bounded by _Default retention
+# and any exclusion filters on the bucket — the script reports actual
+# vs requested days at the end.
+#
+# Requires:
+#   - roles/logging.privateLogViewer on PROJECT (data_access is sensitive)
+#   - roles/bigquery.dataEditor on the target dataset
+# See infra/contexts/deploy/INVARIANTS.md · INV-deploy-backfill for the
+# guarantees this recipe wraps.
+DAYS ?= 40
+backfill: check-project py-deps
+	PROJECT=$(PROJECT) DATASET=$(DATASET) DAYS=$(DAYS) \
+	  $(VENV)/bin/python3 infra/contexts/deploy/application/backfill.py
+	@echo ""
+	@echo "→ backfill complete. POST /api/refresh to re-materialize"
+	@echo "  snapshots with the imported history."
+
 hotfix: check-project py-deps views
 	@echo ""
 	@echo "→ Views applied. Triggering snapshot refresh via /api/refresh…"
