@@ -226,6 +226,19 @@ export type RefreshStatus = {
   note?:         string;
 };
 
+// One item in the /api/refresh response `refreshed` array. Some
+// snapshots skip (view doesn't exist yet), some fail (error string),
+// most succeed with a row_count + seconds.
+export type SnapshotRefreshResult = {
+  snapshot: string;
+  ok: boolean;
+  row_count?: number;
+  seconds?: number;
+  error?: string;
+  skipped?: boolean;
+  reason?: string;
+};
+
 export type QuotaConfig = Record<string, { value: string; updated_at: string | null; updated_by: string | null }>;
 
 export type EngineInfo = { id: string; name: string; type: string | null };
@@ -463,7 +476,7 @@ export const api = {
   agents:  () => get<{ agents: AgentDirectoryRow[]; count: number }>("/api/agents"),
   agent:   (agentId: string) => get<AgentDeepDive>(`/api/agent/${encodeURIComponent(agentId)}`),
   refreshStatus: () => get<RefreshStatus>("/api/refresh/status"),
-  refreshNow:    () => post<{ refreshed: any[]; ok_count: number }>("/api/refresh?triggered_by=ui"),
+  refreshNow:    () => post<{ refreshed: SnapshotRefreshResult[]; ok_count: number }>("/api/refresh?triggered_by=ui"),
   quotaConfig:   () => get<QuotaConfig>("/api/quota/config"),
   quotaSet:      (key: string, value: string) =>
     post<{ key: string; value: string; ok: boolean }>(`/api/quota/config?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}&by=ui`),

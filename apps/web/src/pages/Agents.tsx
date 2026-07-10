@@ -17,18 +17,13 @@ import { useParams, useNavigate } from "react-router-dom";
 import { api, AgentDeepDive as AgentData } from "../api";
 import { Panel, EmptyState } from "../components/Card";
 import { fmtTs } from "../components/DataTable";
+import { ORIGIN_TAG } from "../tags";
 
 const TYPE_TAG: Record<string, string> = {
   "built-in": "bg-info/15 text-info border-info/30",
   "custom":   "bg-ggreen/15 text-ggreen border-ggreen/30",
 };
 
-const ORIGIN_TAG: Record<string, string> = {
-  HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
-  SIMULATED:  "bg-info/10 text-info border-info/20",
-  AUTOMATION: "bg-warn/10 text-warn border-warn/20",
-  UNKNOWN:    "bg-ink-muted/10 text-ink-muted border-ink-muted/20",
-};
 
 const AGENT_ICON: Record<string, string> = {
   deep_research: "🔬",

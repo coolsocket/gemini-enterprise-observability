@@ -21,6 +21,7 @@ import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
 import { useRange } from "../timerange";
+import { ORIGIN_TAG } from "../tags";
 
 type DailyRow = { d: string; actor_email: string; feature: string; n: number };
 const DAILY_FEATURE_ORDER = ["chat", "deep_research", "notebooklm", "a2a", "agent_create"];
@@ -32,11 +33,6 @@ const DAILY_FEATURE_META: Record<string, { label: string; icon: string; color: s
   agent_create:  { label: "Agent 创建",   icon: "🔧", color: "text-warn" },
 };
 
-const ORIGIN_TAG: Record<string, string> = {
-  HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
-  AUTOMATION: "bg-warn/10   text-warn   border-warn/20",
-  UNKNOWN:    "bg-ink-muted/10 text-ink-muted border-ink-muted/20",
-};
 
 export default function DataAccess() {
   const { origin } = useOrigin();

@@ -19,22 +19,9 @@ import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useRange } from "../timerange";
+import { ORIGIN_TAG, PERSONA_TAG } from "../tags";
 
-const PERSONA_TAG: Record<string, string> = {
-  POWER_USER:      "bg-gblue/15   text-gblue   border-gblue/30",
-  ACTIVE_CONSUMER: "bg-ggreen/15  text-ggreen  border-ggreen/30",
-  TRIAL:           "bg-gyellow/15 text-gyellow border-gyellow/30",
-  BUILDER:         "bg-gred/15    text-gred    border-gred/30",
-  EXPLORER:        "bg-info/15    text-info    border-info/30",
-  LURKER:          "bg-ink-muted/15 text-ink-muted border-ink-muted/30",
-  AUTOMATION:      "bg-ink-secondary/10 text-ink-secondary border-ink-secondary/30",
-};
 
-const ORIGIN_TAG: Record<string, string> = {
-  HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
-  AUTOMATION: "bg-warn/10   text-warn   border-warn/20",
-  UNKNOWN:    "bg-ink-muted/10 text-ink-muted border-ink-muted/20",
-};
 
 export default function Persona() {
   const { origin } = useOrigin();

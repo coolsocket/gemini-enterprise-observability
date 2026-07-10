@@ -18,25 +18,11 @@ import { useParams, useNavigate } from "react-router-dom";
 import { api, UserDeepDive as UserData } from "../api";
 import { Panel, EmptyState } from "../components/Card";
 import { fmtTs } from "../components/DataTable";
+import { Metric, DrillData } from "../components/Metric";
 import { useRange } from "../timerange";
+import { ORIGIN_TAG, PERSONA_TAG } from "../tags";
 
-const ORIGIN_TAG: Record<string, string> = {
-  HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
-  SIMULATED:  "bg-info/10 text-info border-info/20",
-  AUTOMATION: "bg-warn/10 text-warn border-warn/20",
-  UNKNOWN:    "bg-ink-muted/10 text-ink-muted border-ink-muted/20",
-};
 
-const PERSONA_TAG: Record<string, string> = {
-  POWER_USER:      "bg-info/15 text-info border-info/30",
-  ACTIVE_CONSUMER: "bg-ggreen/15 text-ggreen border-ggreen/30",
-  BUILDER:         "bg-gred/15 text-gred border-gred/30",
-  TRIAL:           "bg-gyellow/15 text-gyellow border-gyellow/30",
-  EXPLORER:        "bg-gblue/15 text-gblue border-gblue/30",
-  LURKER:          "bg-ink-muted/15 text-ink-muted border-ink-muted/30",
-  AUTOMATION:      "bg-warn/15 text-warn border-warn/30",
-  SIMULATED:       "bg-info/15 text-info border-info/30",
-};
 
 // identity_kind badge — one icon + tooltip per IdP kind.
 // Keep tuple order stable so tests/greps can pattern-match easily.
@@ -265,88 +251,7 @@ function Picker() {
   );
 }
 
-// ============================================================
-// Compact metric block: big number + label + optional sub-line
-// Click → expand drill-down panel below.
-// Two drill modes: plain (timestamps only) or "prompts" (with reverse-attributed prompt text).
-// ============================================================
-type DrillPlain = { kind: "plain"; rows: Array<{ timestamp: string; primary: string; secondary?: string }> };
-type DrillPrompts = {
-  kind: "prompts";
-  rows: Array<{ timestamp: string; primary: string; prompt: string | null; delta_sec?: number | null }>;
-};
-type DrillData = DrillPlain | DrillPrompts;
-
-function Metric({ value, label, sub, accent, icon, drill, open, onToggle }: {
-  value: number | string;
-  label: string;
-  sub?: React.ReactNode;
-  accent: string;
-  icon?: string;
-  drill?: DrillData;
-  open?: boolean;
-  onToggle?: () => void;
-}) {
-  const clickable = !!onToggle && !!drill;
-  return (
-    <div className="group">
-      <button
-        type="button"
-        onClick={clickable ? onToggle : undefined}
-        disabled={!clickable}
-        className={`flex items-baseline gap-3 w-full text-left ${clickable ? "hover:opacity-90 cursor-pointer" : "cursor-default"}`}
-      >
-        {icon && <span className="text-xl shrink-0">{icon}</span>}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2">
-            <span className={`text-3xl font-semibold tabular-nums ${accent}`}>{value}</span>
-            <span className="text-xs text-ink-secondary font-medium uppercase tracking-wide">{label}</span>
-            {clickable && (
-              <span className="text-[10px] text-ink-muted ml-1">
-                {open ? "▾ 收起" : "▸ 看哪几次"}
-              </span>
-            )}
-          </div>
-          {sub && <div className="text-[11px] text-ink-muted mt-0.5">{sub}</div>}
-        </div>
-      </button>
-      {clickable && open && drill && (
-        <div className="mt-2 ml-9 max-h-[260px] overflow-y-auto border-l-2 border-info/30 pl-3 space-y-1.5">
-          {drill.rows.length === 0 ? (
-            <div className="text-[11px] text-ink-muted py-1">最近事件里没匹配项（可能已过 retention window）</div>
-          ) : drill.kind === "plain" ? (
-            drill.rows.map((r, i) => (
-              <div key={i} className="text-[11px] flex items-baseline gap-2">
-                <span className="text-ink-muted font-mono shrink-0">{fmtTs(r.timestamp)}</span>
-                <span className="text-ink-secondary font-mono">{r.primary}</span>
-                {r.secondary && <span className="text-ink-muted">{r.secondary}</span>}
-              </div>
-            ))
-          ) : (
-            drill.rows.map((r, i) => (
-              <div key={i} className="text-[11px]">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-ink-muted font-mono shrink-0">{fmtTs(r.timestamp)}</span>
-                  <span className="text-ink-secondary font-mono text-[10px]">{r.primary}</span>
-                </div>
-                {r.prompt ? (
-                  <div className="ml-3 mt-0.5 text-ink-primary leading-snug">
-                    <span className="text-info">"</span>{r.prompt}<span className="text-info">"</span>
-                    {r.delta_sec != null && (
-                      <span className="text-[9px] text-ink-muted ml-2">±{Math.abs(r.delta_sec)}s</span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="ml-3 mt-0.5 text-ink-muted italic">prompt 未找到</div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+// Metric + DrillData moved to components/Metric.tsx (R3d, 2026-07-10)
 
 // Horizontal bar — one row, label left, count right, bar in between
 // Click to expand and show drill-down rows

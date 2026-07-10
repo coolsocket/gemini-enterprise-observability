@@ -19,6 +19,7 @@ import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
 import { useRange } from "../timerange";
+import { ORIGIN_TAG } from "../tags";
 
 const ACTION_TONE: Record<string, string> = {
   Create: "bg-ggreen/15 text-ggreen border-ggreen/30",
@@ -28,11 +29,6 @@ const ACTION_TONE: Record<string, string> = {
   List:   "bg-ink-muted/15 text-ink-muted border-ink-muted/30",
 };
 
-const ORIGIN_TAG: Record<string, string> = {
-  HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
-  AUTOMATION: "bg-warn/10   text-warn   border-warn/20",
-  UNKNOWN:    "bg-ink-muted/10 text-ink-muted border-ink-muted/20",
-};
 
 function actionTone(action: string): string {
   for (const prefix of ["Create", "Update", "Delete", "Get", "List"]) {

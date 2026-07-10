@@ -18,12 +18,8 @@ import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useRange } from "../timerange";
+import { ORIGIN_TAG } from "../tags";
 
-const ORIGIN_TAG: Record<string, string> = {
-  HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
-  AUTOMATION: "bg-warn/10   text-warn   border-warn/20",
-  UNKNOWN:    "bg-ink-muted/10 text-ink-muted border-ink-muted/20",
-};
 
 export default function Builders() {
   const { origin } = useOrigin();

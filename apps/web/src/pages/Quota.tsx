@@ -18,6 +18,7 @@ import { useNavigate } from "react-router-dom";
 import { api, QuotaOverview } from "../api";
 import { Panel, EmptyState } from "../components/Card";
 import { fmtTs } from "../components/DataTable";
+import { QuotaTotalCard } from "../components/QuotaTotalCard";
 
 // Inline editable number cell — click to edit, Enter/blur to save, Esc to cancel
 function EditableNumber({ value, onSave, saving, accent }: {
@@ -88,34 +89,9 @@ function pct(x: number): string {
   return `${Math.round(x * 100)}%`;
 }
 
-function TotalCard({ feature, total, used, users, over_quota_users, overall_utilization }: {
-  feature: string; total: number; used: number; users: number; over_quota_users: number; overall_utilization: number | null;
-}) {
-  const meta = FEATURE_META[feature] ?? { label: feature, icon: "•", color: "text-ink-primary", hint: "" };
-  const util = overall_utilization ?? 0;
-  const barColor = util >= 0.9 ? "bg-gred/60" : util >= 0.6 ? "bg-gyellow/60" : "bg-ggreen/60";
-  return (
-    <div className="rounded-lg border border-border-subtle bg-surface p-3">
-      <div className="flex items-baseline gap-2 mb-1">
-        <span className="text-lg">{meta.icon}</span>
-        <span className={`text-sm font-semibold ${meta.color}`}>{meta.label}</span>
-      </div>
-      <div className="text-[10px] text-ink-muted mb-2">{meta.hint}</div>
-      <div className="flex items-baseline gap-1.5 mb-1">
-        <span className="text-2xl font-semibold text-ink-primary tabular-nums">{used}</span>
-        <span className="text-sm text-ink-muted">/ {total}</span>
-        <span className="text-[11px] text-ink-muted ml-auto tabular-nums">{pct(util)}</span>
-      </div>
-      <div className="h-1.5 rounded-full bg-subtle overflow-hidden">
-        <div className={`h-full ${barColor} transition-all`} style={{ width: `${Math.min(100, util * 100)}%` }} />
-      </div>
-      <div className="flex justify-between text-[10px] text-ink-muted mt-1.5">
-        <span>{users} seats</span>
-        {over_quota_users > 0 && <span className="text-gred">{over_quota_users} 超额</span>}
-      </div>
-    </div>
-  );
-}
+// TotalCard moved to components/QuotaTotalCard.tsx (R3c, 2026-07-10).
+// FEATURE_META still lives here so the page controls the label taxonomy.
+const _DEFAULT_META = { label: "?", icon: "•", color: "text-ink-primary", hint: "" };
 
 function UsageBar({ used, limit, over }: { used: number; limit: number; over: boolean }) {
   const util = limit > 0 ? Math.min(1, used / limit) : 0;
@@ -293,9 +269,9 @@ export default function Quota() {
             const t = d.totals.find(x => x.feature === f);
             if (!t) return null;
             return (
-              <TotalCard
+              <QuotaTotalCard
                 key={f}
-                feature={f}
+                featureMeta={FEATURE_META[f] ?? _DEFAULT_META}
                 total={t.total_daily_quota}
                 used={t.total_used_today}
                 users={t.eligible_users}

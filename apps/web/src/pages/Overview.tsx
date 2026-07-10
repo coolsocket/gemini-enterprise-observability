@@ -176,7 +176,7 @@ export default function Overview() {
           <div className="space-y-3">
             <div className="text-xs text-ink-muted">{t("overview.engines.alive")}: {alive.data.agent ?? 0} agent · {alive.data.datastore ?? 0} data store · {alive.data.engine ?? 0} engine</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {engines.data.rows.map((e: any) => (
+              {engines.data.rows.map((e) => (
                 <div key={e.engine_id} className="bg-subtle/40 border border-border-subtle rounded-lg px-4 py-3">
                   <div className="text-sm font-medium text-ink-primary truncate">{e.engine_display_name ?? e.engine_id}</div>
                   <div className="text-[10px] font-mono text-ink-muted truncate">{e.engine_id}</div>
