@@ -89,8 +89,3 @@ MAX_WORKERS_PER_ROUTE: int = 8
 # ADC-based (google.auth.default under the hood). Same instance is reused
 # across all routes for connection pooling.
 bq: bigquery.Client = bigquery.Client(project=PROJECT)
-
-
-def table(name: str) -> str:
-    """Fully-qualified `project.dataset.name` for use in SQL string interpolation."""
-    return f"{PROJECT}.{DATASET}.{name}"

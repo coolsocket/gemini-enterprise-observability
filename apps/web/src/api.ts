@@ -246,38 +246,6 @@ export type SessionFileRow = {
   file_activity_signal: "confirmed" | "likely" | "unknown";
 };
 
-export type AgentUsageRow = {
-  agent_id: string;
-  assistant_id: string;
-  engine_id_raw: string | null;
-  engine_display_name: string | null;
-  traces: number;
-  chunks: number;
-};
-
-export type ConversationRow = {
-  timestamp: string;
-  trace_id: string;
-  actor_email: string;
-  origin: Origin;
-  engine_id_raw: string | null;
-  engine_display_name: string | null;
-  prompt: string;
-  session_id: string | null;
-  state: string | null;
-  assist_token: string | null;
-};
-
-export type ChoiceRow = {
-  timestamp: string;
-  trace_id: string;
-  engine_id_raw: string | null;
-  agent_id: string | null;
-  finish_reason: string | null;
-  response_text: string | null;
-  reasoning_text: string | null;
-  part_count: number;
-};
 
 async function post<T>(path: string): Promise<T> {
   const r = await fetch(path, { method: "POST" });
