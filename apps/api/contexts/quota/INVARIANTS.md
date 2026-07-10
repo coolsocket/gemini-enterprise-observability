@@ -26,3 +26,30 @@ seats not covered by an assignment fall back to `quota.default_tier`
 Note: the tier-allocation math is deliberately duplicated in Python and
 SQL. Python `allocate_seats` is the reference implementation; keep both
 in sync when the invariant evolves.
+
+## INV-quota-002: user-supplied fields in mutations MUST be bound as ScalarQueryParameter
+
+Every write path (`quota_config_set`, `quota_set_tier`) receives arbitrary
+strings from the frontend. All such fields — `key`, `value`, `email`,
+`tier`, `by`, `notes` — MUST reach BigQuery via
+`bigquery.ScalarQueryParameter`, never via f-string / `%` / `.format()`
+interpolation.
+
+Startswith / character-blocklist guards (e.g. `if "'" in email`) are
+insufficient defenses on their own and MUST NOT be the last line of
+defense. They may co-exist as an early 400 for obviously-bad shape, but
+the SQL layer must still parameterize.
+
+- **Code:** `apps/api/routes/quota.py::quota_config_set` (already correct
+  reference impl) and `apps/api/routes/quota.py::quota_set_tier` (this
+  invariant added because f-string interpolation was found in the wild
+  2026-07-10; the fix mirrors the config_set pattern).
+- **Test:** `tests/unit/test_quota_write_injection.py` — payloads with
+  quotes, semicolons, and comment markers MUST NOT alter the executed
+  SQL; parser sees them as literal string values.
+
+Note: read-side inline SQL that concatenates *internal* identifiers
+(view names, dataset names from env) is fine because those inputs are
+not user-controllable. This invariant scopes to user-supplied fields on
+mutation endpoints.
+

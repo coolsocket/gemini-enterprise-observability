@@ -171,18 +171,33 @@ def quota_overview(window_days: int = 1) -> JSONResponse:
 
 @router.post("/api/quota/tier")
 def quota_set_tier(email: str, tier: str, by: str = "manual", notes: str = "") -> dict[str, Any]:
-    """Assign or update an actor's tier."""
+    """Assign or update an actor's tier.
+
+    INV-quota-002 — email / tier / by / notes are all user-controlled and
+    MUST reach BigQuery as bound parameters, not f-string substitutions.
+    Prior version had `'{email}' email` / `'{by}'` / `'{notes}'` inlined,
+    which the earlier "no single quotes" guard did NOT actually block
+    (e.g. backslash + comment marker payloads bypass it).
+    """
     if tier not in {"standard", "plus"}:
         raise HTTPException(400, "tier must be 'standard' or 'plus'")
-    if "'" in email or "'" in notes:
-        raise HTTPException(400, "no single quotes in email/notes")
-    _bq.query(f"""
+    _bq.query(
+        f"""
         MERGE `{PROJECT}.{DATASET}.user_tier` t
-        USING (SELECT '{email}' email, '{tier}' tier) s
+        USING (SELECT @email email, @tier tier) s
         ON t.actor_email = s.email
         WHEN MATCHED THEN UPDATE SET tier = s.tier, assigned_at = CURRENT_TIMESTAMP(),
-                                     assigned_by = '{by}', notes = '{notes}'
+                                     assigned_by = @by, notes = @notes
         WHEN NOT MATCHED THEN INSERT (actor_email, tier, assigned_at, assigned_by, notes)
-          VALUES (s.email, s.tier, CURRENT_TIMESTAMP(), '{by}', '{notes}')
-    """).result()
+          VALUES (s.email, s.tier, CURRENT_TIMESTAMP(), @by, @notes)
+        """,
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("email", "STRING", email),
+                bigquery.ScalarQueryParameter("tier",  "STRING", tier),
+                bigquery.ScalarQueryParameter("by",    "STRING", by),
+                bigquery.ScalarQueryParameter("notes", "STRING", notes),
+            ]
+        ),
+    ).result()
     return {"email": email, "tier": tier, "ok": True}
