@@ -264,23 +264,42 @@ export default function Quota() {
             "超额人数" 仅今日口径下才有意义,此窗口下不显示。
           </div>
         )}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
-          {FEATURE_ORDER.map(f => {
-            const t = d.totals.find(x => x.feature === f);
-            if (!t) return null;
-            return (
-              <QuotaTotalCard
-                key={f}
-                featureMeta={FEATURE_META[f] ?? _DEFAULT_META}
-                total={t.total_daily_quota}
-                used={t.total_used_today}
-                users={t.eligible_users}
-                over_quota_users={t.users_over_quota}
-                overall_utilization={t.overall_utilization}
-              />
-            );
-          })}
-        </div>
+        {d.totals.length === 0 ? (
+          // Empty totals = no tier.*_daily keys in this tenant's
+          // quota_config. v_quota_totals's tier_limits CTE is empty →
+          // per_feature_capacity join gives 0 rows. Point the operator
+          // at the tier config table below so they know how to unblock.
+          <EmptyState
+            title="没有配额数据"
+            hint={
+              <span>
+                此租户的 <code className="bg-subtle px-1 rounded">quota_config</code> 里
+                没有 <code className="bg-subtle px-1 rounded">tier.*_daily</code> 键 —
+                在下方 <b>"Tier 阈值配置"</b> 里给每个 feature (chat / deep_research /
+                notebooklm / a2a / agent_create) 填入 standard / plus 上限就会出现。
+                Sandbox 已经 seed 过默认值; vivo 生产环境需要 admin 手动配。
+              </span>
+            }
+          />
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+            {FEATURE_ORDER.map(f => {
+              const t = d.totals.find(x => x.feature === f);
+              if (!t) return null;
+              return (
+                <QuotaTotalCard
+                  key={f}
+                  featureMeta={FEATURE_META[f] ?? _DEFAULT_META}
+                  total={t.total_daily_quota}
+                  used={t.total_used_today}
+                  users={t.eligible_users}
+                  over_quota_users={t.users_over_quota}
+                  overall_utilization={t.overall_utilization}
+                />
+              );
+            })}
+          </div>
+        )}
       </Panel>
 
       {/* Recent 7d trend */}
