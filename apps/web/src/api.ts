@@ -435,6 +435,7 @@ export type LicensedUsers = {
   count: number;
   assigned_count: number;
   unseen_count: number;
+  blocked_count: number;   // NO_LICENSE_ATTEMPTED_LOGIN — 想用但被 DE 挡回
   note?: string;
 };
 

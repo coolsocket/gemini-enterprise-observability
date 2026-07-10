@@ -48,7 +48,10 @@ def parse_user_licenses(rows: list[dict[str, Any]]) -> dict[str, Any]:
         {
           "count":          int,   # len(rows)
           "assigned_count": int,   # licenseAssignmentState == ASSIGNED
-          "unseen_count":   int,   # assigned but no lastLoginTime
+          "unseen_count":   int,   # ASSIGNED but no lastLoginTime
+          "blocked_count":  int,   # NO_LICENSE_ATTEMPTED_LOGIN
+                                   # — 想用但没被分配 license, DE 拦了.
+                                   # 每条都必有 lastLoginTime, 那正是"被拦"的时刻.
           "users": [
             { user_principal, state, license_config,
               create_time, update_time, last_login_time }, ...
@@ -58,6 +61,7 @@ def parse_user_licenses(rows: list[dict[str, Any]]) -> dict[str, Any]:
     users: list[dict[str, Any]] = []
     assigned_count = 0
     unseen_count = 0
+    blocked_count = 0
     for r in rows or []:
         state = r.get("licenseAssignmentState") or "UNKNOWN"
         last_login = r.get("lastLoginTime")
@@ -65,6 +69,8 @@ def parse_user_licenses(rows: list[dict[str, Any]]) -> dict[str, Any]:
             assigned_count += 1
             if not last_login:
                 unseen_count += 1
+        elif state == "NO_LICENSE_ATTEMPTED_LOGIN":
+            blocked_count += 1
         users.append({
             "user_principal":  r.get("userPrincipal") or "",
             "state":           state,
@@ -77,5 +83,6 @@ def parse_user_licenses(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "count":          len(users),
         "assigned_count": assigned_count,
         "unseen_count":   unseen_count,
+        "blocked_count":  blocked_count,
         "users":          users,
     }

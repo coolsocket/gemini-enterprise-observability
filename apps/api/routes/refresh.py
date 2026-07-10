@@ -264,7 +264,8 @@ def persona_licensed_users() -> JSONResponse:
     except Exception as e:
         log.warning("userLicenses fetch failed: %s", e)
         return JSONResponse(
-            content={"users": [], "count": 0, "assigned_count": 0, "unseen_count": 0,
+            content={"users": [], "count": 0, "assigned_count": 0,
+                     "unseen_count": 0, "blocked_count": 0,
                      "note": f"userLicenses API unavailable: {str(e)[:200]}"},
             headers={"Cache-Control": "no-store"},
         )
