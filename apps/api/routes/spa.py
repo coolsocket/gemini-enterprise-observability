@@ -33,10 +33,18 @@ router = APIRouter()
 # import back-edge into main. If the on-disk layout changes, update both.
 WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
+# Entry HTML must NEVER be cached — it references content-hashed chunk
+# filenames that a subsequent build will invalidate. Cached HTML pointing
+# at deleted hashes = white-screen "Failed to fetch dynamically imported
+# module" on the next release. Real asset files under /assets/ are
+# themselves content-hashed and safe to cache (browser default is fine;
+# StaticFiles mount in main.py handles those).
+_NO_CACHE_HTML = {"Cache-Control": "no-store"}
+
 
 @router.get("/")
 def index() -> FileResponse:
-    return FileResponse(WEB_DIST / "index.html")
+    return FileResponse(WEB_DIST / "index.html", headers=_NO_CACHE_HTML)
 
 
 @router.get("/{path:path}")
@@ -45,5 +53,9 @@ def spa_fallback(path: str) -> FileResponse:
         raise HTTPException(status_code=404)
     target = WEB_DIST / path
     if target.is_file():
+        # A real static file — favicon, robots.txt, etc. Content-hashed
+        # or stable enough that default caching is OK.
         return FileResponse(target)
-    return FileResponse(WEB_DIST / "index.html")
+    # Client-side route (React Router path) — fall through to the SPA
+    # entry HTML. Same no-cache rule as index() above.
+    return FileResponse(WEB_DIST / "index.html", headers=_NO_CACHE_HTML)
