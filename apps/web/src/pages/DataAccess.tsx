@@ -13,13 +13,24 @@
 // limitations under the License.
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { api, DataAccessRow, DataAccessSummaryRow } from "../api";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { api, DataAccessRow, DataAccessSummaryRow, AgentDirectoryRow } from "../api";
 import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useEngine } from "../engine";
 import { useRange } from "../timerange";
+
+type DailyRow = { d: string; actor_email: string; feature: string; n: number };
+const DAILY_FEATURE_ORDER = ["chat", "deep_research", "notebooklm", "a2a", "agent_create"];
+const DAILY_FEATURE_META: Record<string, { label: string; icon: string; color: string }> = {
+  chat:          { label: "Chat",         icon: "💬", color: "text-ggreen" },
+  deep_research: { label: "Deep Research",icon: "🔬", color: "text-info" },
+  notebooklm:    { label: "NotebookLM",   icon: "📓", color: "text-gblue" },
+  a2a:           { label: "A2A",          icon: "🧩", color: "text-gyellow" },
+  agent_create:  { label: "Agent 创建",   icon: "🔧", color: "text-warn" },
+};
 
 const ORIGIN_TAG: Record<string, string> = {
   HUMAN:      "bg-ggreen/10 text-ggreen border-ggreen/20",
@@ -39,6 +50,28 @@ export default function DataAccess() {
     queryKey: ["v_data_access", origin, engineId, range],
     queryFn: () => api.view<DataAccessRow>("v_data_access", origin, engineId, range),
   });
+  const daily = useQuery({
+    // v_daily_usage_per_user has no origin/engine columns — global daily.
+    queryKey: ["v_daily_usage_per_user", range],
+    queryFn: () => api.view<DailyRow>("v_daily_usage_per_user", undefined, null, range),
+  });
+  const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents });
+
+  // Pivot daily rows → (day → {feature: n, total: n}) sorted desc by day.
+  const dailyPivot = useMemo(() => {
+    const byDay: Record<string, Record<string, number>> = {};
+    (daily.data?.rows ?? []).forEach(r => {
+      if (!byDay[r.d]) byDay[r.d] = {};
+      byDay[r.d][r.feature] = (byDay[r.d][r.feature] ?? 0) + r.n;
+    });
+    return Object.entries(byDay)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([d, feats]) => ({
+        d,
+        feats,
+        total: DAILY_FEATURE_ORDER.reduce((s, f) => s + (feats[f] ?? 0), 0),
+      }));
+  }, [daily.data?.rows]);
 
   // Simplified: hide autocomplete (noise) + session_files; surface chat/search/session/feedback
   const summaryCols: Col<DataAccessSummaryRow>[] = [
@@ -123,7 +156,114 @@ export default function DataAccess() {
       <div className="text-xs text-ink-muted px-1 space-y-1">
         <div>💡 数据面读取统计。Autocomplete（搜索框打字）属于噪音指标已隐藏；如需查看原始逐笔记录展开下方时间线。</div>
         <div>⚠️ <b>Deep Research</b>（AsyncAssist / ReadAsyncAssist）只能看到<b>调用次数</b> — prompt + response 文本不被 gen_ai 日志记录（与 GE UI 路径同源限制）。要看原始 prompt 内容请去 GE 后台的 Deep Research 任务列表。</div>
+        <div>🖼️ <b>Image / Video 生成</b>: GE 目前<b>不输出</b> customer audit logs — 生成任务跑在 Google 内部基础设施上,没有 principalEmail / methodName 可挂钩。我们试过按 prompt 关键字("generate an image of…")启发式匹配,误报率高到不可用（"summarize this video" 会被误分类）。等 GE 暴露 per-feature 计数 API 再启用。</div>
       </div>
+
+      {/* Daily × feature panel */}
+      <Panel
+        title="每日 × feature 使用量"
+        action={
+          <span className="text-[10px] text-ink-muted">
+            来自 v_daily_usage_per_user · 加州日 · 忽略 origin 过滤
+          </span>
+        }
+      >
+        {!daily.data ? <EmptyState title="加载中…" /> :
+         dailyPivot.length === 0 ? <EmptyState title="无数据" hint="选定时间窗内没有事件" /> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-ink-muted border-b border-border-subtle/40">
+                  <th className="py-1 pr-3 font-normal">日期</th>
+                  {DAILY_FEATURE_ORDER.map(f => (
+                    <th key={f} className="py-1 pr-3 font-normal text-right"
+                        title={DAILY_FEATURE_META[f].label}>
+                      {DAILY_FEATURE_META[f].icon} {DAILY_FEATURE_META[f].label}
+                    </th>
+                  ))}
+                  <th className="py-1 pr-3 font-normal text-right">Σ 全天</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailyPivot.map(({ d, feats, total }) => (
+                  <tr key={d} className="border-b border-border-subtle/20 hover:bg-subtle/30">
+                    <td className="py-1 pr-3 font-mono text-ink-secondary">{d}</td>
+                    {DAILY_FEATURE_ORDER.map(f => {
+                      const v = feats[f] ?? 0;
+                      return (
+                        <td key={f} className={`py-1 pr-3 text-right tabular-nums ${v > 0 ? DAILY_FEATURE_META[f].color : "text-ink-muted opacity-40"}`}>
+                          {v > 0 ? v : "·"}
+                        </td>
+                      );
+                    })}
+                    <td className="py-1 pr-3 text-right tabular-nums font-semibold text-ink-primary">
+                      {total}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      {/* Per-agent panel */}
+      <Panel
+        title={`Per-agent 明细 · ${agents.data?.count ?? 0} agents`}
+        action={
+          <span className="text-[10px] text-ink-muted">
+            built-in (Deep Research / NotebookLM / A2A) + 自建
+          </span>
+        }
+      >
+        {!agents.data ? <EmptyState title="加载中…" /> :
+         agents.data.agents.length === 0 ? <EmptyState title="没有 agent" hint="没有 built-in 使用记录,也无自建 agent" /> : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-ink-muted border-b border-border-subtle/40">
+                <th className="py-1 pr-3 font-normal">Agent</th>
+                <th className="py-1 pr-3 font-normal">类型</th>
+                <th className="py-1 pr-3 font-normal text-right">总调用</th>
+                <th className="py-1 pr-3 font-normal text-right">unique 用户</th>
+                <th className="py-1 pr-3 font-normal">最活跃</th>
+                <th className="py-1 pr-3 font-normal">最近</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(agents.data.agents as AgentDirectoryRow[])
+                .slice() // don't mutate query cache
+                .sort((a, b) => b.total - a.total)
+                .map(a => (
+                <tr key={a.agent_id} className="border-b border-border-subtle/20 hover:bg-subtle/30">
+                  <td className="py-1 pr-3">
+                    <Link to={`/agent/${encodeURIComponent(a.agent_id)}`}
+                          className="text-info hover:underline">{a.agent_name}</Link>
+                    <span className="ml-1.5 text-[10px] text-ink-muted font-mono">{a.agent_id}</span>
+                  </td>
+                  <td className="py-1 pr-3">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] border ${
+                      a.agent_type === "built-in"
+                        ? "bg-info/10 text-info border-info/20"
+                        : "bg-gyellow/10 text-gyellow border-gyellow/20"
+                    }`}>{a.agent_type}</span>
+                    {a.signal_kind === "page_opens" && (
+                      <span className="ml-1 text-[9px] text-ink-muted" title="计的是 UI 打开次数,不是真实调用">📖 opens</span>
+                    )}
+                  </td>
+                  <td className="py-1 pr-3 text-right tabular-nums font-semibold">{a.total}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums text-ink-secondary">{a.unique_users}</td>
+                  <td className="py-1 pr-3 font-mono text-ink-muted">
+                    {a.top_user_email ? (
+                      <span title={`共 ${a.top_user_value} 次`}>{a.top_user_email}</span>
+                    ) : "—"}
+                  </td>
+                  <td className="py-1 pr-3 font-mono text-ink-muted">{fmtTs(a.last_activity)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Panel>
 
       <Panel
         title={`谁查了什么 · 汇总 ${origin ? `· ${origin}` : ""}`}
