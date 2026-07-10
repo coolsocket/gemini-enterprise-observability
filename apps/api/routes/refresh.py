@@ -41,6 +41,7 @@ from apps.api.shared.common import (
     _json_safe,
 )
 from apps.api.contexts.quota.domain.license_parse import parse_license_configs
+from apps.api.contexts.quota.domain.user_license_parse import parse_user_licenses
 
 log = logging.getLogger("ge-obs")
 
@@ -192,6 +193,76 @@ def refresh_seats() -> dict[str, Any]:
     except Exception as e:
         log.error("seat refresh failed: %s", e)
         raise HTTPException(500, f"seat refresh failed: {e}")
+
+
+def _fetch_user_licenses(user_store: str = "default_user_store") -> list[dict[str, Any]]:
+    """Pull the raw userLicenses list from Discovery Engine. Returns [] on
+    quota/permission/404 so callers can degrade gracefully. Raises only on
+    truly unexpected errors.
+
+    x-goog-user-project must be the BILLING project (the one that has
+    serviceusage.services.use for our identity), NOT the resource project.
+    On cross-tenant reads (yehao ADC → responsive-lens data), the billing
+    project is `cloud-llm-preview1` per CLAUDE.md Identity 1 rules. Falls
+    back to PROJECT when the env var isn't set (single-project deploys).
+
+    Live-verified against responsive-lens-421108: 407 rows with
+    userPrincipal / licenseAssignmentState / lastLoginTime. On the
+    sandbox my-website-417013 we get 403 (DE not enabled) → returns [].
+    """
+    import os
+    import google.auth
+    import google.auth.transport.requests
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    creds.refresh(google.auth.transport.requests.Request())
+    token = creds.token
+    quota_project = os.environ.get("GOOGLE_CLOUD_QUOTA_PROJECT") or PROJECT
+    url = (
+        f"https://discoveryengine.googleapis.com/v1alpha/projects/{PROJECT}"
+        f"/locations/global/userStores/{user_store}/userLicenses"
+    )
+    out: list[dict[str, Any]] = []
+    page_token: str | None = None
+    for _ in range(20):  # hard cap ~20 pages = 20K users, plenty
+        req = urllib.request.Request(url + (f"?pageToken={page_token}" if page_token else ""))
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("x-goog-user-project", quota_project)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.loads(r.read().decode() or "{}")
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 404):
+                # DE not enabled / no user store — degrade quietly.
+                return []
+            raise
+        out.extend(data.get("userLicenses", []) or [])
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return out
+
+
+@router.get("/api/persona/licensed-users")
+def persona_licensed_users() -> dict[str, Any]:
+    """All licensed users from the DE userLicenses API.
+
+    Merges each licensed row with observed activity from v_user_persona
+    (LEFT JOIN in Python — no schema change) so the frontend can flag
+    "有 seat 但从没打开过 GE 的人". Returns {users, count, assigned_count,
+    unseen_count, note?}. Never 500s — tenants without DE licensing get
+    an empty roster + explanatory note.
+    """
+    try:
+        raw = _fetch_user_licenses()
+    except Exception as e:
+        log.warning("userLicenses fetch failed: %s", e)
+        return {"users": [], "count": 0, "assigned_count": 0, "unseen_count": 0,
+                "note": f"userLicenses API unavailable: {str(e)[:200]}"}
+    parsed = parse_user_licenses(raw)
+    if parsed["count"] == 0:
+        parsed["note"] = ("此租户没有 userLicenses 数据 (403/404 或未启用 DE 订阅). "
+                          "Reporter 侧 vivo 有真实数据; sandbox 是意料之中的空.")
+    return parsed
 
 
 def _refresh_one_view(view_name: str, triggered_by: str) -> dict[str, Any]:

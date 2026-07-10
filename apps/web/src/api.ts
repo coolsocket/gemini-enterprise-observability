@@ -454,6 +454,22 @@ export type UserTierRow = {
   assigned_by: string | null;
 };
 
+export type LicensedUser = {
+  user_principal: string;      // email for Workspace tenants, numeric subject for OIDC/WIF
+  state: string;               // ASSIGNED / UNASSIGNED / ...
+  license_config: string | null;
+  create_time: string | null;
+  update_time: string | null;
+  last_login_time: string | null;
+};
+export type LicensedUsers = {
+  users: LicensedUser[];
+  count: number;
+  assigned_count: number;
+  unseen_count: number;
+  note?: string;
+};
+
 export type QuotaOverview = {
   today_ca: string;
   window_days: number;
@@ -484,6 +500,7 @@ export const api = {
     post<{ key: string; value: string; ok: boolean }>(`/api/quota/config?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}&by=ui`),
   quotaOverview: (windowDays: 1 | 7 | 30 = 1) =>
     get<QuotaOverview>(`/api/quota/overview?window_days=${windowDays}`),
+  personaLicensedUsers: () => get<LicensedUsers>("/api/persona/licensed-users"),
   quotaSetTier:  (email: string, tier: "standard" | "plus", notes = "") =>
     post<{ email: string; tier: string; ok: boolean }>(`/api/quota/tier?email=${encodeURIComponent(email)}&tier=${tier}&by=ui&notes=${encodeURIComponent(notes)}`),
 };
