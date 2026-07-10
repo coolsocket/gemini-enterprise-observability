@@ -89,16 +89,64 @@ def quota_config_set(key: str, value: str, by: str = "manual") -> dict[str, Any]
 
 
 @router.get("/api/quota/overview")
-def quota_overview() -> JSONResponse:
-    """Everything the /quota page needs in one round trip."""
+def quota_overview(window_days: int = 1) -> JSONResponse:
+    """Everything the /quota page needs in one round trip.
+
+    window_days: 1 (default) uses v_quota_totals (today only, from view).
+                 7 or 30 replaces the totals block with a python-side
+                 aggregate over the last N California days from
+                 v_daily_usage_per_user. total_daily_quota is scaled by N
+                 so the "used vs total" ratio stays meaningful (the view's
+                 semantic is "how much of my window budget did I burn").
+                 Values outside {1,7,30} are clamped to the nearest.
+    """
     import concurrent.futures
+    # Clamp to supported windows.
+    if window_days not in (1, 7, 30):
+        window_days = 1 if window_days < 4 else (7 if window_days < 14 else 30)
+
+    if window_days == 1:
+        totals_sql = f"SELECT * FROM `{PROJECT}.{DATASET}.v_quota_totals`"
+    else:
+        # Aggregate over last N CA days from v_daily_usage_per_user, then
+        # scale total_daily_quota × N so the ratio is comparable to today.
+        totals_sql = f"""
+        WITH usage AS (
+          SELECT feature, SUM(n) AS total_used_today,
+                 COUNT(DISTINCT actor_email) AS active_users
+          FROM `{PROJECT}.{DATASET}.v_daily_usage_per_user`
+          WHERE d >= DATE_SUB(DATE(CURRENT_TIMESTAMP(), 'America/Los_Angeles'),
+                              INTERVAL {window_days - 1} DAY)
+          GROUP BY feature
+        ),
+        capacity AS (
+          -- Reuse v_quota_totals for the today capacity/eligible seats,
+          -- then multiply by N to get the window capacity.
+          SELECT feature, eligible_users, total_daily_quota
+          FROM `{PROJECT}.{DATASET}.v_quota_totals`
+        )
+        SELECT
+          c.feature,
+          c.eligible_users,
+          c.total_daily_quota * {window_days} AS total_daily_quota,
+          IFNULL(u.total_used_today, 0) AS total_used_today,
+          SAFE_DIVIDE(IFNULL(u.total_used_today, 0),
+                      c.total_daily_quota * {window_days}) AS overall_utilization,
+          -- users_over_quota only meaningful for today; not defined for window.
+          0 AS users_over_quota
+        FROM capacity c
+        LEFT JOIN usage u USING (feature)
+        ORDER BY overall_utilization DESC
+        """
+
     queries = {
-        "totals":      f"SELECT * FROM `{PROJECT}.{DATASET}.v_quota_totals`",
+        "totals":      totals_sql,
         "utilization": f"SELECT * FROM `{PROJECT}.{DATASET}.v_quota_utilization` ORDER BY utilization DESC LIMIT 500",
         "tiers":       f"SELECT actor_email, tier, notes, assigned_at, assigned_by FROM `{PROJECT}.{DATASET}.user_tier` ORDER BY actor_email",
         "config":      f"SELECT key, value FROM `{PROJECT}.{DATASET}.quota_config` WHERE key LIKE 'tier.%' OR key LIKE 'quota.%' OR key LIKE 'license.%' ORDER BY key",
         "recent":      f"""SELECT * FROM `{PROJECT}.{DATASET}.v_daily_usage_per_user`
-                           WHERE d >= DATE_SUB(DATE(CURRENT_TIMESTAMP(), 'America/Los_Angeles'), INTERVAL 6 DAY)
+                           WHERE d >= DATE_SUB(DATE(CURRENT_TIMESTAMP(), 'America/Los_Angeles'),
+                                               INTERVAL {max(window_days, 7) - 1} DAY)
                            ORDER BY d DESC, actor_email, feature""",
     }
     def run(kv):
@@ -117,7 +165,7 @@ def quota_overview() -> JSONResponse:
     import datetime as _dt
     from zoneinfo import ZoneInfo
     today_ca = _dt.datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
-    return JSONResponse(content={"today_ca": today_ca, **out},
+    return JSONResponse(content={"today_ca": today_ca, "window_days": window_days, **out},
                         headers={"Cache-Control": "no-store"})
 
 

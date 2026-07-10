@@ -456,6 +456,7 @@ export type UserTierRow = {
 
 export type QuotaOverview = {
   today_ca: string;
+  window_days: number;
   totals: QuotaTotalRow[];
   utilization: QuotaUtilizationRow[];
   tiers: UserTierRow[];
@@ -481,7 +482,8 @@ export const api = {
   quotaConfig:   () => get<QuotaConfig>("/api/quota/config"),
   quotaSet:      (key: string, value: string) =>
     post<{ key: string; value: string; ok: boolean }>(`/api/quota/config?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}&by=ui`),
-  quotaOverview: () => get<QuotaOverview>("/api/quota/overview"),
+  quotaOverview: (windowDays: 1 | 7 | 30 = 1) =>
+    get<QuotaOverview>(`/api/quota/overview?window_days=${windowDays}`),
   quotaSetTier:  (email: string, tier: "standard" | "plus", notes = "") =>
     post<{ email: string; tier: string; ok: boolean }>(`/api/quota/tier?email=${encodeURIComponent(email)}&tier=${tier}&by=ui&notes=${encodeURIComponent(notes)}`),
 };

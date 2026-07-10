@@ -69,13 +69,15 @@ function EditableNumber({ value, onSave, saving, accent }: {
 const FEATURE_META: Record<string, { label: string; icon: string; color: string; hint: string }> = {
   chat:          { label: "Chat",         icon: "💬", color: "text-ggreen",  hint: "StreamAssist 调用次数" },
   deep_research: { label: "Deep Research",icon: "🔬", color: "text-info",    hint: "AsyncAssist 提交次数（不含轮询）。⚠ GE 会在普通聊天时也触发 AsyncAssist,此计数可能虚高" },
+  notebooklm:    { label: "NotebookLM",   icon: "📓", color: "text-info",    hint: "Create/Update/Delete/Generate 等写入操作 (不含 Get/List 读)" },
+  a2a:           { label: "Agent-to-Agent",icon: "🧩", color: "text-gyellow",hint: "assistants.agents.a2a.v1 调用次数" },
   agent_create:  { label: "Agent 创建",   icon: "🔧", color: "text-gyellow", hint: "AgentService.CreateAgent 事件" },
 };
 // image_gen / video_gen / idea_gen removed 2026-07-06 — GE runs those inside
 // Google infra without customer audit logs, so we can only guess from prompt
 // keywords, which was inaccurate enough to mislead. Bring back only when GE
 // exposes a real per-feature counter.
-const FEATURE_ORDER = ["chat", "deep_research", "agent_create"];
+const FEATURE_ORDER = ["chat", "deep_research", "notebooklm", "a2a", "agent_create"];
 
 const TIER_TAG: Record<string, string> = {
   standard: "bg-ink-muted/15 text-ink-secondary border-ink-muted/30",
@@ -133,7 +135,11 @@ function UsageBar({ used, limit, over }: { used: number; limit: number; over: bo
 export default function Quota() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["quota-overview"], queryFn: () => api.quotaOverview() });
+  const [windowDays, setWindowDays] = useState<1 | 7 | 30>(1);
+  const q = useQuery({
+    queryKey: ["quota-overview", windowDays],
+    queryFn: () => api.quotaOverview(windowDays),
+  });
   const setTier = useMutation({
     mutationFn: ({ email, tier }: { email: string; tier: "standard" | "plus" }) =>
       api.quotaSetTier(email, tier),
@@ -257,8 +263,32 @@ export default function Quota() {
       )}
 
       {/* Per-feature totals grid */}
-      <Panel title="今日全平台使用 vs 总配额">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+      <Panel
+        title={windowDays === 1 ? "今日全平台使用 vs 总配额" : `最近 ${windowDays} 天全平台使用 vs 总配额`}
+        action={
+          <div className="flex items-center gap-1 text-[10px]">
+            {([1, 7, 30] as const).map(w => (
+              <button
+                key={w}
+                onClick={() => setWindowDays(w)}
+                className={`h-6 px-2 rounded ${windowDays === w
+                  ? "bg-info/15 text-info border border-info/30 font-medium"
+                  : "text-ink-muted hover:text-ink-secondary border border-transparent"}`}
+                title={w === 1 ? "今天" : `最近 ${w} 天 (总配额已按 ${w}× seat 单日限额 计算)`}
+              >
+                {w === 1 ? "今日" : `${w}d`}
+              </button>
+            ))}
+          </div>
+        }
+      >
+        {windowDays > 1 && (
+          <div className="text-[10px] text-ink-muted mb-2">
+            分母 = 每 seat 单日配额 × {windowDays} 天 × 已购 seats（"这个窗口烧掉了多少预算"的口径）。
+            "超额人数" 仅今日口径下才有意义,此窗口下不显示。
+          </div>
+        )}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
           {FEATURE_ORDER.map(f => {
             const t = d.totals.find(x => x.feature === f);
             if (!t) return null;
@@ -345,7 +375,7 @@ export default function Quota() {
                 onClick={() => toggleSort("tier")}
                 className={`w-14 shrink-0 text-center hover:text-ink-primary ${sortKey === "tier" ? "text-info" : ""}`}
               >Tier{sortArrow("tier")}</button>
-              {FEATURE_ORDER.slice(0, 4).map(f => (
+              {FEATURE_ORDER.map(f => (
                 <button
                   key={f}
                   onClick={() => toggleSort(f)}
@@ -371,7 +401,7 @@ export default function Quota() {
                 >
                   {u.tier.toUpperCase()}
                 </button>
-                {FEATURE_ORDER.slice(0, 4).map(f => {
+                {FEATURE_ORDER.map(f => {
                   const cell = u.features[f];
                   if (!cell) return <div key={f} className="flex-1 text-ink-muted text-center">—</div>;
                   return (
