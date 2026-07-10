@@ -220,6 +220,10 @@ export type RefreshStatus = {
   }>;
   last_refresh: string | null;
   snapshot_count: number;
+  data_earliest: string | null;   // MIN(timestamp) across sink tables
+  data_latest:   string | null;   // MAX(timestamp)
+  data_days:     number | null;   // (latest - earliest) / 1 day
+  note?:         string;
 };
 
 export type QuotaConfig = Record<string, { value: string; updated_at: string | null; updated_by: string | null }>;

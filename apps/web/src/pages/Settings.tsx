@@ -104,8 +104,22 @@ export default function Settings() {
       }>
         {!status.data ? <EmptyState title="加载中…" /> : (
           <>
-            <div className="text-xs text-ink-muted mb-3">
-              最近一次刷新: {fmtTs(status.data.last_refresh)} · 共 {status.data.snapshot_count} 个 snapshot
+            <div className="text-xs text-ink-muted mb-3 space-y-1">
+              <div>最近一次刷新: {fmtTs(status.data.last_refresh)} · 共 {status.data.snapshot_count} 个 snapshot</div>
+              {status.data.data_earliest && status.data.data_latest && (
+                <div>
+                  数据覆盖:
+                  {" "}<span className="text-ink-primary font-medium">{status.data.data_days ?? "?"} 天</span>
+                  {" "}<span className="text-ink-muted">({fmtTs(status.data.data_earliest)}
+                  {" "}→ {fmtTs(status.data.data_latest)})</span>
+                  {status.data.data_days !== null && status.data.data_days < 4 && (
+                    <span className="ml-2 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border border-warn/30 bg-warn/10 text-warn"
+                          title="Sink 建立以来的窗口很短 —— 想看更多历史,跑 `make backfill DAYS=30` 从 Cloud Logging 拉">
+                      仅 sink 期(未 backfill)
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             <div className="rounded-lg border border-border-subtle bg-subtle/30 overflow-hidden">
               <table className="w-full text-xs">

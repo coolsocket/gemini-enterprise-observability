@@ -64,6 +64,7 @@ def refresh_status() -> dict[str, Any]:
     except NotFound:
         return {
             "snapshots": [], "last_refresh": None, "snapshot_count": 0,
+            "data_earliest": None, "data_latest": None, "data_days": 0,
             "note": (
                 f"snapshot_meta table not present in {PROJECT}.{DATASET}. "
                 "Run `make bootstrap` (or `terraform apply`) to create it, "
@@ -71,10 +72,53 @@ def refresh_status() -> dict[str, Any]:
             ),
         }
     most_recent = max((r["refreshed_at"] for r in rows), default=None)
+
+    # Data window signal — operator can tell at a glance whether
+    # `make backfill` has been run: earliest timestamp across the two
+    # highest-volume sink tables (audit + user_activity). If earliest
+    # is close to snapshot_meta's oldest triggered_by=hotfix row →
+    # sink-only coverage. If much older → backfill ran.
+    data_earliest = None
+    data_latest = None
+    try:
+        window_sql = f"""
+        SELECT MIN(ts) mn, MAX(ts) mx FROM (
+          SELECT MIN(timestamp) ts
+            FROM `{PROJECT}.{DATASET}.cloudaudit_googleapis_com_data_access`
+          UNION ALL
+          SELECT MIN(timestamp)
+            FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+          UNION ALL
+          SELECT MAX(timestamp)
+            FROM `{PROJECT}.{DATASET}.cloudaudit_googleapis_com_data_access`
+          UNION ALL
+          SELECT MAX(timestamp)
+            FROM `{PROJECT}.{DATASET}.discoveryengine_googleapis_com_gemini_enterprise_user_activity`
+        )
+        """
+        window_row = next(iter(_bq.query(window_sql).result()), None)
+        if window_row and window_row.mn is not None:
+            data_earliest = window_row.mn.isoformat()
+            data_latest = window_row.mx.isoformat() if window_row.mx else None
+    except NotFound:
+        pass  # sink tables absent — first-time deploy before any traffic
+
+    data_days = None
+    if data_earliest and data_latest:
+        from datetime import datetime as _dt
+        try:
+            span = (_dt.fromisoformat(data_latest) - _dt.fromisoformat(data_earliest))
+            data_days = round(span.total_seconds() / 86400, 1)
+        except Exception:
+            pass
+
     return {
         "snapshots": rows,
         "last_refresh": most_recent,
         "snapshot_count": len(rows),
+        "data_earliest": data_earliest,
+        "data_latest": data_latest,
+        "data_days": data_days,
     }
 
 

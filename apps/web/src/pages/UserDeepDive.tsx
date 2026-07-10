@@ -87,10 +87,11 @@ const ORIGIN_FILTERS: Array<{ key: "ALL" | "HUMAN" | "SIMULATED" | "AUTOMATION";
   { key: "AUTOMATION", label: "自动",   cls: "text-warn" },
 ];
 
-function FeaturePill({ icon, value, color }: { icon: string; value: number; color: string }) {
-  if (value === 0) return <span className="text-ink-muted opacity-30 tabular-nums w-10 text-right text-[10px]">·</span>;
+function FeaturePill({ icon, value, color, label }: { icon: string; value: number; color: string; label?: string }) {
+  const tip = label ? `${label}: ${value}` : `${icon} ${value}`;
+  if (value === 0) return <span className="text-ink-muted opacity-30 tabular-nums w-10 text-right text-[10px]" title={tip}>·</span>;
   return (
-    <span className={`tabular-nums text-[11px] font-semibold ${color} w-10 text-right`} title={`${icon} ${value}`}>
+    <span className={`tabular-nums text-[11px] font-semibold ${color} w-10 text-right`} title={tip}>
       {value}
     </span>
   );
@@ -232,12 +233,18 @@ function Picker() {
 
                 {/* Feature usage pills (hidden on small) */}
                 <div className="hidden lg:flex items-center gap-1 shrink-0">
-                  <FeaturePill icon="💬" value={u.chat_turns} color="text-ggreen" />
-                  <FeaturePill icon="🔬" value={u.deep_research_calls} color="text-info" />
-                  <FeaturePill icon="📓" value={u.notebooklm_ops} color="text-gblue" />
-                  <FeaturePill icon="🧩" value={u.custom_agent_visits} color="text-ggreen" />
-                  <FeaturePill icon="🔎" value={u.programmatic_searches} color="text-gblue" />
-                  <FeaturePill icon="📎" value={u.session_files} color="text-ink-secondary" />
+                  <FeaturePill icon="💬" value={u.chat_turns} color="text-ggreen"
+                    label="Chat turns (StreamAssist / Assist)" />
+                  <FeaturePill icon="🔬" value={u.deep_research_calls} color="text-info"
+                    label="Deep Research 调用次数(AsyncAssist)" />
+                  <FeaturePill icon="📓" value={u.notebooklm_ops} color="text-gblue"
+                    label="NotebookLM 操作次数(notebook + content + audio)" />
+                  <FeaturePill icon="🧩" value={u.custom_agent_visits} color="text-ggreen"
+                    label="自建 Agent 页访问次数" />
+                  <FeaturePill icon="🔎" value={u.programmatic_searches} color="text-gblue"
+                    label="REST Search API 调用(程序化)" />
+                  <FeaturePill icon="📎" value={u.session_files} color="text-ink-secondary"
+                    label="文件操作(List + Download SessionFile)" />
                 </div>
 
                 {/* Last seen */}
