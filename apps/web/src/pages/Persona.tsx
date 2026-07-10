@@ -38,29 +38,19 @@ export default function Persona() {
     staleTime: 5 * 60_000,
   });
 
-  const [licensedFilter, setLicensedFilter] = useState<"all" | "unseen" | "blocked">("all");
+  const [licensedFilter, setLicensedFilter] = useState<"all" | "unseen">("all");
   const licensedRows = useMemo(() => {
     const rows = licensed.data?.users ?? [];
     if (licensedFilter === "unseen") {
       return rows.filter(u => u.state === "ASSIGNED" && !u.last_login_time);
     }
-    if (licensedFilter === "blocked") {
-      // "想用但被挡" — tried to log in, DE returned no-license. This IS
-      // a positive demand signal: someone navigated to GE. Higher urgency
-      // than "assigned but hasn't logged in yet".
-      return rows.filter(u => u.state === "NO_LICENSE_ATTEMPTED_LOGIN")
-                 .sort((a, b) => (b.last_login_time ?? "").localeCompare(a.last_login_time ?? ""));
-    }
-    // "all" — sort: blocked first (demand signal, most actionable),
-    // then unseen (paid seat wasted), then most-recently-active desc.
+    // "all" — 排序: 未曾登录 (paid seat wasted) 排前面, 然后按最近登录 desc.
+    // (parser 已在服务端过滤掉 login-attempted-without-license 那批,
+    //  见 user_license_parse.py 2026-07-10 revert.)
     return [...rows].sort((a, b) => {
-      const rank = (u: LicensedUser) => {
-        if (u.state === "NO_LICENSE_ATTEMPTED_LOGIN") return 0;
-        if (u.state === "ASSIGNED" && !u.last_login_time) return 1;
-        return 2;
-      };
-      const ra = rank(a), rb = rank(b);
-      if (ra !== rb) return ra - rb;
+      const aUnseen = a.state === "ASSIGNED" && !a.last_login_time ? 0 : 1;
+      const bUnseen = b.state === "ASSIGNED" && !b.last_login_time ? 0 : 1;
+      if (aUnseen !== bUnseen) return aUnseen - bUnseen;
       return (b.last_login_time ?? "").localeCompare(a.last_login_time ?? "");
     });
   }, [licensed.data, licensedFilter]);
@@ -140,46 +130,30 @@ export default function Persona() {
         title={
           licensed.data
             ? `订阅接口 · 全量购买 seat 用户 · ${licensed.data.count}`
-              + ` (${licensed.data.assigned_count} 已分配 · ${licensed.data.unseen_count} 未曾登录 · ${licensed.data.blocked_count} 想用但被挡)`
+              + ` (${licensed.data.assigned_count} 已分配 · ${licensed.data.unseen_count} 未曾登录)`
             : "订阅接口 · 全量购买 seat 用户 · 加载中…"
         }
         action={
           licensed.data && licensed.data.count > 0 && (
             <div className="flex items-center gap-1 text-[10px]">
-              {(["all", "unseen", "blocked"] as const).map(f => (
+              {(["all", "unseen"] as const).map(f => (
                 <button
                   key={f}
                   onClick={() => setLicensedFilter(f)}
                   className={`h-6 px-2 rounded ${licensedFilter === f
                     ? "bg-info/15 text-info border border-info/30 font-medium"
                     : "text-ink-muted hover:text-ink-secondary border border-transparent"}`}
-                  title={
-                    f === "blocked"
-                      ? "NO_LICENSE_ATTEMPTED_LOGIN — 用户点开 GE 页面, DE 发现没 license, 拒了并把这次尝试记下来。这是最强的采纳需求信号。"
-                      : f === "unseen"
-                      ? "ASSIGNED · 无 last_login — 有 seat 但从未打开过。可以推动 onboarding, 或收回 seat 释放给别人。"
-                      : "全部行, 排序: 想用但被挡 → 未曾登录 → 最近登录"
-                  }
                 >
-                  {f === "all"     ? "全部" :
-                   f === "unseen"  ? `未曾登录 (${licensed.data.unseen_count})` :
-                                     `想用但被挡 (${licensed.data.blocked_count})`}
+                  {f === "all" ? "全部" : `未曾登录 (${licensed.data.unseen_count})`}
                 </button>
               ))}
             </div>
           )
         }
       >
-        <div className="text-[10px] text-ink-muted mb-3 space-y-1">
-          <div>
-            来源: Discovery Engine v1alpha <code className="bg-subtle px-1 rounded">userLicenses</code> API.
-            <b>userPrincipal</b> 在 Workspace 租户是邮箱; 在 OIDC/WIF 租户 (如 vivo) 是数字 subject ID.
-          </div>
-          {licensed.data && licensed.data.blocked_count > 0 && (
-            <div className="text-warn">
-              ⚠ 有 <b>{licensed.data.blocked_count}</b> 个人打开了 GE 但因为没 license 被挡。他们是<b>最强的采纳需求信号</b> — 优先看这批。
-            </div>
-          )}
+        <div className="text-[10px] text-ink-muted mb-3">
+          来源: Discovery Engine v1alpha <code className="bg-subtle px-1 rounded">userLicenses</code> API.
+          <b>userPrincipal</b> 在 Workspace 租户是邮箱; 在 OIDC/WIF 租户 (如 vivo) 是数字 subject ID.
         </div>
         {!licensed.data ? <EmptyState title="加载中…" /> :
          licensed.data.count === 0 ? (
@@ -188,10 +162,7 @@ export default function Persona() {
             hint={licensed.data.note ?? "此租户 userLicenses API 返回空,或该环境未启用 DE 订阅."}
           />
         ) : licensedRows.length === 0 ? (
-          <EmptyState
-            title={licensedFilter === "blocked" ? "无想用但被挡的用户 🎉" : "无未曾登录用户 🎉"}
-            hint={licensedFilter === "blocked" ? "所有想用的人都有 seat" : "所有 seat 都被至少用了一次"}
-          />
+          <EmptyState title="无未曾登录用户 🎉" hint="所有 seat 都被至少用了一次" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -207,24 +178,15 @@ export default function Persona() {
               <tbody>
                 {licensedRows.slice(0, 500).map((u: LicensedUser) => {
                   const unseen = u.state === "ASSIGNED" && !u.last_login_time;
-                  const blocked = u.state === "NO_LICENSE_ATTEMPTED_LOGIN";
-                  const rowBg = blocked ? "bg-gred/5" : unseen ? "bg-warn/5" : "";
-                  const stateTag =
-                    u.state === "ASSIGNED"                   ? "bg-ggreen/10 text-ggreen border-ggreen/30" :
-                    u.state === "NO_LICENSE_ATTEMPTED_LOGIN" ? "bg-gred/10   text-gred   border-gred/30"   :
-                                                                "bg-ink-muted/10 text-ink-muted border-ink-muted/30";
+                  const stateTag = u.state === "ASSIGNED"
+                    ? "bg-ggreen/10 text-ggreen border-ggreen/30"
+                    : "bg-ink-muted/10 text-ink-muted border-ink-muted/30";
                   return (
                     <tr key={u.user_principal}
-                        className={`border-b border-border-subtle/20 hover:bg-subtle/30 ${rowBg}`}>
+                        className={`border-b border-border-subtle/20 hover:bg-subtle/30 ${unseen ? "bg-warn/5" : ""}`}>
                       <td className="py-1 pr-3 font-mono text-ink-primary">{u.user_principal || "(空)"}</td>
                       <td className="py-1 pr-3">
                         <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] border ${stateTag}`}>{u.state}</span>
-                        {blocked && (
-                          <span className="ml-2 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border border-gred/40 bg-gred/10 text-gred"
-                                title="打开了 GE 页面, 但没被分配 license, 被 DE 拦了。是最强的采纳需求信号 — 考虑给他们分个 seat。">
-                            想用但被挡
-                          </span>
-                        )}
                         {unseen && (
                           <span className="ml-2 inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border border-warn/30 bg-warn/10 text-warn"
                                 title="有 seat 但从未登录 — 可以撤销 seat 或推动 onboarding">

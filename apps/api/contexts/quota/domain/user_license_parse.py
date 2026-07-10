@@ -41,18 +41,24 @@ from typing import Any
 def parse_user_licenses(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Normalise a userLicenses response.
 
+    Rows whose state is NO_LICENSE_ATTEMPTED_LOGIN are filtered OUT of
+    the returned users list per user request 2026-07-10 — they were
+    initially surfaced (R5) as the "想用但被挡" cohort but the user
+    reviewed the vivo live data and decided they add noise. We still
+    count them (blocked_count) for observability, but Persona.tsx
+    doesn't render the count either.
+
     Args:
         rows: the `userLicenses` array as returned by the DE list endpoint.
 
     Returns:
         {
-          "count":          int,   # len(rows)
+          "count":          int,   # len(users) AFTER filter
           "assigned_count": int,   # licenseAssignmentState == ASSIGNED
           "unseen_count":   int,   # ASSIGNED but no lastLoginTime
-          "blocked_count":  int,   # NO_LICENSE_ATTEMPTED_LOGIN
-                                   # — 想用但没被分配 license, DE 拦了.
-                                   # 每条都必有 lastLoginTime, 那正是"被拦"的时刻.
-          "users": [
+          "blocked_count":  int,   # NO_LICENSE_ATTEMPTED_LOGIN (filtered out
+                                   # of users[]; kept as a scalar for ops).
+          "users": [               # ASSIGNED + NO_LICENSE only, blocked absent.
             { user_principal, state, license_config,
               create_time, update_time, last_login_time }, ...
           ],
@@ -65,12 +71,14 @@ def parse_user_licenses(rows: list[dict[str, Any]]) -> dict[str, Any]:
     for r in rows or []:
         state = r.get("licenseAssignmentState") or "UNKNOWN"
         last_login = r.get("lastLoginTime")
+        if state == "NO_LICENSE_ATTEMPTED_LOGIN":
+            # Count but drop — never surface to the caller / frontend.
+            blocked_count += 1
+            continue
         if state == "ASSIGNED":
             assigned_count += 1
             if not last_login:
                 unseen_count += 1
-        elif state == "NO_LICENSE_ATTEMPTED_LOGIN":
-            blocked_count += 1
         users.append({
             "user_principal":  r.get("userPrincipal") or "",
             "state":           state,

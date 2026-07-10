@@ -12,23 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""RED for R5 (2026-07-10) — Persona page must surface people who
-TRIED to log into GE but had no license.
+"""RED for R5-revert (2026-07-10) — user asked to hide the
+NO_LICENSE_ATTEMPTED_LOGIN cohort entirely: "NO_LICENSE_ATTEMPTED_LOGIN
+的用户全部不要显示，删掉就好".
 
-Discovery Engine's userLicenses API returns three states:
-  ASSIGNED                     — has a license
-  NO_LICENSE                   — no license, no login attempt recorded
-  NO_LICENSE_ATTEMPTED_LOGIN   — tried to log in, DE blocked them
+The prior R5 commit surfaced them as a distinct "想用但被挡" filter +
+red-highlight chip on Persona. The user reviewed the live vivo view
+and decided they add noise more than signal. Filter them out at the
+parser (so the frontend never sees them), and strip the UI additions.
 
-On live vivo (2026-07-10) the distribution is 322 / 2 / 83. The 83
-NO_LICENSE_ATTEMPTED_LOGIN principals are demand signal — someone
-navigated to GE, hit the wall, and never got in. That's more urgent
-for an admin than "user has seat but hasn't logged in yet".
-
-R5a · Parser must expose `blocked_count` (NO_LICENSE_ATTEMPTED_LOGIN).
-R5b · Persona.tsx must reference the state string so admins can
-      filter/sort/highlight the blocked cohort separately from the
-      "assigned-but-unseen" cohort.
+Invariants asserted here:
+  * parse_user_licenses.users MUST NOT contain any row whose
+    licenseAssignmentState == NO_LICENSE_ATTEMPTED_LOGIN
+  * count MUST reflect the filtered length, not the raw input length
+    (so `count` == `assigned_count + NO_LICENSE-only rows`, which for
+    vivo's fixture drops from 407 → 324)
+  * blocked_count MAY still be reported for observability, but
+    Persona.tsx MUST NOT reference the state string or blocked_count
+    anywhere in its render tree
 """
 from pathlib import Path
 
@@ -36,16 +37,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 
-def test_parser_exposes_blocked_count() -> None:
-    """`parse_user_licenses` output should include `blocked_count` (users
-    with state == NO_LICENSE_ATTEMPTED_LOGIN). Currently only
-    `assigned_count` and `unseen_count` are surfaced — the 83 blocked
-    are invisible to the frontend without extra scanning."""
+def test_parser_filters_out_blocked_rows() -> None:
     from apps.api.contexts.quota.domain.user_license_parse import parse_user_licenses
     fixture = [
         {"userPrincipal": "1001", "licenseAssignmentState": "ASSIGNED",
          "lastLoginTime": "2026-07-01T00:00:00Z"},
-        {"userPrincipal": "1002", "licenseAssignmentState": "ASSIGNED"},  # unseen
+        {"userPrincipal": "1002", "licenseAssignmentState": "ASSIGNED"},
         {"userPrincipal": "1003", "licenseAssignmentState": "NO_LICENSE_ATTEMPTED_LOGIN",
          "lastLoginTime": "2026-07-02T00:00:00Z"},
         {"userPrincipal": "1004", "licenseAssignmentState": "NO_LICENSE_ATTEMPTED_LOGIN",
@@ -53,25 +50,38 @@ def test_parser_exposes_blocked_count() -> None:
         {"userPrincipal": "1005", "licenseAssignmentState": "NO_LICENSE"},
     ]
     out = parse_user_licenses(fixture)
-    assert "blocked_count" in out, (
-        "parse_user_licenses missing `blocked_count` (# rows in state "
-        "NO_LICENSE_ATTEMPTED_LOGIN). Add it so the Persona UI can render "
-        "the 'wanted to use but got blocked' cohort as its own panel."
+
+    # No blocked rows leak into the users list.
+    for u in out["users"]:
+        assert u["state"] != "NO_LICENSE_ATTEMPTED_LOGIN", (
+            f"NO_LICENSE_ATTEMPTED_LOGIN row leaked into parser output: "
+            f"{u!r}. These should be filtered upstream — per user request "
+            f"2026-07-10 they add noise, not signal."
+        )
+    # count reflects the filtered list (3 remaining: 2 ASSIGNED + 1 NO_LICENSE),
+    # NOT the raw fixture length of 5.
+    assert out["count"] == 3, (
+        f"count should reflect filtered length; got {out['count']} for a "
+        f"fixture where 2 of 5 rows were blocked (should drop to 3)."
     )
-    assert out["blocked_count"] == 2, (
-        f"blocked_count should count NO_LICENSE_ATTEMPTED_LOGIN rows only; "
-        f"got {out.get('blocked_count')} for fixture with 2 such rows."
-    )
+    # assigned_count unchanged
+    assert out["assigned_count"] == 2
 
 
-def test_persona_page_surfaces_blocked_cohort() -> None:
-    """Persona.tsx must reference the NO_LICENSE_ATTEMPTED_LOGIN state
-    so admins can see the blocked users distinctly. Either a filter,
-    a separate panel, or a labeled chip counts."""
+def test_persona_page_no_blocked_references() -> None:
+    """Persona.tsx should NOT mention NO_LICENSE_ATTEMPTED_LOGIN or
+    blocked_count anywhere — the user rejected surfacing that cohort."""
     src = (REPO / "apps/web/src/pages/Persona.tsx").read_text()
-    assert "NO_LICENSE_ATTEMPTED_LOGIN" in src or "blocked_count" in src, (
-        "Persona.tsx doesn't reference NO_LICENSE_ATTEMPTED_LOGIN or "
-        "blocked_count. Add a filter/panel that highlights these — they "
-        "are 'demand signal' (tried to use GE, got walled), more urgent "
-        "than the 'unseen' cohort we already surface."
+    assert "NO_LICENSE_ATTEMPTED_LOGIN" not in src, (
+        "Persona.tsx still references NO_LICENSE_ATTEMPTED_LOGIN — the "
+        "R5 UI additions must be reverted (filter chip, red highlight, "
+        "warn banner, panel title, sort priority)."
+    )
+    assert "blocked_count" not in src, (
+        "Persona.tsx still references blocked_count — drop the count "
+        "reference from the panel title so it stays clean."
+    )
+    assert "想用但被挡" not in src, (
+        "Persona.tsx still has the '想用但被挡' UI copy — remove all "
+        "traces of the blocked cohort."
     )
