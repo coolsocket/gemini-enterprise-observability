@@ -39,7 +39,13 @@ from apps.api.contexts.observability.domain.query_builder import (
     render_live_fallback_sql,
     build_summary_filters,
     render_summary_sql,
+    SummaryResponse,
 )
+
+# Shared header for read endpoints — dashboards render fresh every tick,
+# no intermediate proxy should cache. `no-store` also disables browser
+# back-forward cache serving stale JSON on re-navigation.
+_NO_CACHE = {"Cache-Control": "no-store"}
 
 log = logging.getLogger("ge-obs")
 
@@ -126,7 +132,7 @@ def view_rows(view: str, limit: int = 1000, origin: Optional[str] = None,
 # ============================================================
 
 @router.get("/api/agents")
-def list_agents() -> dict[str, Any]:
+def list_agents() -> JSONResponse:
     """All known agents, with usage totals + top user."""
     sql = f"SELECT * FROM `{PROJECT}.{DATASET}.{snapshot_name('v_agent_directory')}` ORDER BY total DESC"
     try:
@@ -136,7 +142,7 @@ def list_agents() -> dict[str, Any]:
         rows = [_json_safe(dict(r)) for r in _bq.query(
             f"SELECT * FROM `{PROJECT}.{DATASET}.v_agent_directory` ORDER BY total DESC"
         ).result()]
-    return {"agents": rows, "count": len(rows)}
+    return JSONResponse(content={"agents": rows, "count": len(rows)}, headers=_NO_CACHE)
 
 
 @router.get("/api/agent/{agent_id}")
@@ -251,7 +257,7 @@ def agent_deep_dive(agent_id: str) -> JSONResponse:
 
 
 @router.get("/api/users")
-def list_users(since_hours: Optional[int] = None) -> dict[str, Any]:
+def list_users(since_hours: Optional[int] = None) -> JSONResponse:
     """All actors who've shown up anywhere, with rich per-user dimensions for picker."""
     time_filter = ""
     if since_hours and since_hours > 0:
@@ -305,7 +311,7 @@ def list_users(since_hours: Optional[int] = None) -> dict[str, Any]:
         ident = resolve_identity(row.get("actor_email"), None)
         row["identity_kind"] = ident.kind.value
         row["is_human"] = ident.is_human
-    return {"users": rows, "count": len(rows)}
+    return JSONResponse(content={"users": rows, "count": len(rows)}, headers=_NO_CACHE)
 
 
 @router.get("/api/user/{email}")
@@ -424,9 +430,9 @@ def user_deep_dive(email: str, live: bool = False) -> JSONResponse:
 MAX_SINCE_HOURS = 8760  # 1 year — beyond this BQ TIMESTAMP_SUB overflows
 
 
-@router.get("/api/summary")
+@router.get("/api/summary", response_model=SummaryResponse)
 def summary(origin: Optional[str] = None, engine_id: Optional[str] = None, live: bool = False,
-            since_hours: Optional[int] = None) -> dict[str, Any]:
+            since_hours: Optional[int] = None) -> JSONResponse:
     """KPI summary. ?origin=HUMAN filters out service accounts.
 
     Restructured to surface two-group semantics:
@@ -455,4 +461,8 @@ def summary(origin: Optional[str] = None, engine_id: Optional[str] = None, live:
             raise
         log.warning("summary: snapshot missing, retrying against live views")
         return summary(origin=origin, engine_id=engine_id, live=True, since_hours=since_hours)
-    return _json_safe(dict(row)) if row else {}
+    # Validate against the Pydantic model so the response shape is
+    # enforced (extra=forbid), then serialize. Fresh deploys with all
+    # nulls fall back to the model's int/None defaults.
+    payload = SummaryResponse(**_json_safe(dict(row))) if row else SummaryResponse()
+    return JSONResponse(content=payload.model_dump(), headers=_NO_CACHE)

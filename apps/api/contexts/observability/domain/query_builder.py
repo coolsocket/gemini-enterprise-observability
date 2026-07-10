@@ -32,6 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Optional
 
+from pydantic import BaseModel
+
 from apps.api.contexts.observability.domain.view_registry import (
     VIEWS,
     VIEWS_WITH_ORIGIN,
@@ -278,3 +280,34 @@ def render_summary_sql(project: str, dataset: str, f: SummaryFilters) -> str:
       ua.ts  AS last_user_activity_event
     FROM a, d, e, adm, dac, ua, conv
     """
+
+
+class SummaryResponse(BaseModel):
+    """Shape returned by /api/summary. Mirrors the 16 columns projected
+    by render_summary_sql. Nullable ints default to 0 when the snapshot
+    is empty (fresh deploy); timestamps default to None so the frontend
+    can render '—' rather than an epoch date.
+
+    Grouped by intent for readability — the SELECT list in
+    render_summary_sql uses the same order so drift is obvious.
+    """
+    model_config = {"extra": "forbid"}
+    # adoption + quality
+    human_users:            int = 0
+    power_users:            int = 0
+    active_consumers:       int = 0
+    trial_users:            int = 0
+    human_builders:         int = 0
+    explorers:              int = 0
+    lurkers:                int = 0
+    human_chat_turns_7d:    int = 0
+    conversations_captured: int = 0
+    # governance + audit
+    admin_actions:          int = 0
+    chat_turns_total:       int = 0
+    data_access_calls:      int = 0
+    engines_tracked:        int = 0
+    # data freshness — ISO-8601 timestamps or None
+    last_admin_event:         Optional[str] = None
+    last_data_access_event:   Optional[str] = None
+    last_user_activity_event: Optional[str] = None

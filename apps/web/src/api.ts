@@ -486,7 +486,7 @@ export const api = {
   engines: () => get<EngineListResponse>("/api/engines"),
   aliveResources: () => get<AliveResources>("/api/resources/alive"),
   summary: (origin?: Origin, engineId?: string | null, sinceHours?: number | null) =>
-    get<Summary & Record<string, any>>(`/api/summary${qs({ origin, engine_id: engineId, since_hours: sinceHours })}`),
+    get<Summary>(`/api/summary${qs({ origin, engine_id: engineId, since_hours: sinceHours })}`),
   view:    <T = Record<string, unknown>>(name: string, origin?: Origin, engineId?: string | null, sinceHours?: number | null) =>
     get<ViewResponse<T>>(`/api/v/${encodeURIComponent(name)}${qs({ origin, engine_id: engineId, since_hours: sinceHours })}`),
   users:   (sinceHours?: number | null) => get<{ users: UserListEntry[]; count: number }>(`/api/users${qs({ since_hours: sinceHours })}`),
@@ -500,7 +500,7 @@ export const api = {
     post<{ key: string; value: string; ok: boolean }>(`/api/quota/config?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}&by=ui`),
   quotaOverview: (windowDays: 1 | 7 | 30 = 1) =>
     get<QuotaOverview>(`/api/quota/overview?window_days=${windowDays}`),
-  personaLicensedUsers: () => get<LicensedUsers>("/api/persona/licensed-users"),
+  personaLicensedUsers: () => get<LicensedUsers>("/api/persona/licensed_users"),
   quotaSetTier:  (email: string, tier: "standard" | "plus", notes = "") =>
     post<{ email: string; tier: string; ok: boolean }>(`/api/quota/tier?email=${encodeURIComponent(email)}&tier=${tier}&by=ui&notes=${encodeURIComponent(notes)}`),
 };

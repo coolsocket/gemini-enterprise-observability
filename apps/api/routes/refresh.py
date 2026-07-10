@@ -31,6 +31,7 @@ import urllib.request
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from google.cloud import bigquery
 
 from apps.api.shared.infrastructure.bq_client import bq as _bq, PROJECT, DATASET
@@ -49,7 +50,7 @@ router = APIRouter()
 
 
 @router.get("/api/refresh/status")
-def refresh_status() -> dict[str, Any]:
+def refresh_status() -> JSONResponse:
     """Last refresh metadata per snapshot. Degrades gracefully to empty +
     hint when snapshot_meta table doesn't exist (fresh deploy, terraform
     hasn't run yet, or admin dropped the table)."""
@@ -113,14 +114,17 @@ def refresh_status() -> dict[str, Any]:
         except Exception:
             pass
 
-    return {
-        "snapshots": rows,
-        "last_refresh": most_recent,
-        "snapshot_count": len(rows),
-        "data_earliest": data_earliest,
-        "data_latest": data_latest,
-        "data_days": data_days,
-    }
+    return JSONResponse(
+        content={
+            "snapshots": rows,
+            "last_refresh": most_recent,
+            "snapshot_count": len(rows),
+            "data_earliest": data_earliest,
+            "data_latest": data_latest,
+            "data_days": data_days,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _fetch_and_persist_license_configs() -> dict[str, Any]:
@@ -242,8 +246,8 @@ def _fetch_user_licenses(user_store: str = "default_user_store") -> list[dict[st
     return out
 
 
-@router.get("/api/persona/licensed-users")
-def persona_licensed_users() -> dict[str, Any]:
+@router.get("/api/persona/licensed_users")
+def persona_licensed_users() -> JSONResponse:
     """All licensed users from the DE userLicenses API.
 
     Merges each licensed row with observed activity from v_user_persona
@@ -251,18 +255,24 @@ def persona_licensed_users() -> dict[str, Any]:
     "有 seat 但从没打开过 GE 的人". Returns {users, count, assigned_count,
     unseen_count, note?}. Never 500s — tenants without DE licensing get
     an empty roster + explanatory note.
+
+    Path renamed 2026-07-10 from `/licensed-users` to `/licensed_users`
+    for consistency with the rest of the /api/* surface (all snake_case).
     """
     try:
         raw = _fetch_user_licenses()
     except Exception as e:
         log.warning("userLicenses fetch failed: %s", e)
-        return {"users": [], "count": 0, "assigned_count": 0, "unseen_count": 0,
-                "note": f"userLicenses API unavailable: {str(e)[:200]}"}
+        return JSONResponse(
+            content={"users": [], "count": 0, "assigned_count": 0, "unseen_count": 0,
+                     "note": f"userLicenses API unavailable: {str(e)[:200]}"},
+            headers={"Cache-Control": "no-store"},
+        )
     parsed = parse_user_licenses(raw)
     if parsed["count"] == 0:
         parsed["note"] = ("此租户没有 userLicenses 数据 (403/404 或未启用 DE 订阅). "
                           "Reporter 侧 vivo 有真实数据; sandbox 是意料之中的空.")
-    return parsed
+    return JSONResponse(content=parsed, headers={"Cache-Control": "no-store"})
 
 
 def _refresh_one_view(view_name: str, triggered_by: str) -> dict[str, Any]:

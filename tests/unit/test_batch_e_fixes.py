@@ -29,7 +29,7 @@
   E1 · Add a fetch+parse in the quota context (like license_parse but
        for per-user assignments). Pure fn returning MERGE-ready rows.
 
-  E2 · Wire a GET /api/persona/licensed-users endpoint. Return
+  E2 · Wire a GET /api/persona/licensed_users endpoint. Return
        {users, count, note?}. On 403/404 or empty tenant, return
        {users: [], count: 0, note: "..."} — must not 500.
 
@@ -95,11 +95,11 @@ def test_e1_parser_shape() -> None:
 def test_e2_route_licensed_users_exists() -> None:
     src = (REPO / "apps/api/routes/refresh.py").read_text()
     has_route = re.search(
-        r"@router\.(get|post)\(\s*[\"']/api/persona/licensed-users[\"']",
+        r"@router\.(get|post)\(\s*[\"']/api/persona/licensed_users[\"']",
         src,
     )
     assert has_route, (
-        "Missing route: GET /api/persona/licensed-users. Wire the fetch + "
+        "Missing route: GET /api/persona/licensed_users. Wire the fetch + "
         "parse_user_licenses + return {users, count, note?}. Handle 403/404 "
         "gracefully so sandbox tenants without DE setup don't 500."
     )

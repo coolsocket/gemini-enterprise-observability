@@ -25,49 +25,60 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from apps.api.shared.infrastructure.bq_client import bq as _bq, PROJECT, DATASET
 from apps.api.shared.common import VIEWS
 
 router = APIRouter()
 
+# Dashboards refresh on every navigation — intermediate caches / bfcache
+# would show stale counts. Applied to every read endpoint except /healthz
+# (which really is a stateless ping and safe to cache).
+_NO_CACHE = {"Cache-Control": "no-store"}
+
 
 @router.get("/api/engines")
-def list_engines() -> dict[str, Any]:
+def list_engines() -> JSONResponse:
     """List all known engines (from engine_metadata table) for the engine selector."""
     rows = list(_bq.query(
         f"SELECT engine_id, display_name, solution_type FROM `{PROJECT}.{DATASET}.engine_metadata` ORDER BY display_name"
     ).result())
-    return {"engines": [{"id": r.engine_id, "name": r.display_name, "type": r.solution_type} for r in rows]}
+    return JSONResponse(
+        content={"engines": [{"id": r.engine_id, "name": r.display_name, "type": r.solution_type} for r in rows]},
+        headers=_NO_CACHE,
+    )
 
 
 @router.get("/api/resources/alive")
-def alive_resources() -> dict[str, Any]:
+def alive_resources() -> JSONResponse:
     rows = list(_bq.query(
         f"SELECT resource_type, COUNT(*) c FROM `{PROJECT}.{DATASET}.resources_alive` GROUP BY resource_type"
     ).result())
-    return {r.resource_type: r.c for r in rows}
+    return JSONResponse(content={r.resource_type: r.c for r in rows}, headers=_NO_CACHE)
 
 
 @router.get("/api/healthz")
 def healthz() -> dict[str, str]:
+    # Intentionally NO no-store — healthz is a plain liveness ping,
+    # intermediaries may cache the "ok" for a second without harm.
     return {"status": "ok", "project": PROJECT, "dataset": DATASET}
 
 
 @router.get("/api/meta")
-def meta() -> dict[str, Any]:
-    return {
+def meta() -> JSONResponse:
+    return JSONResponse(content={
         "project": PROJECT,
         "dataset": DATASET,
         "sink_name": "ge-observability-unified",
         "views": [{"name": n, **v} for n, v in VIEWS.items()],
-    }
+    }, headers=_NO_CACHE)
 
 
 @router.get("/api/views")
-def list_views() -> dict[str, Any]:
-    return {
+def list_views() -> JSONResponse:
+    return JSONResponse(content={
         "project": PROJECT,
         "dataset": DATASET,
         "views": [{"name": n, **v} for n, v in VIEWS.items()],
-    }
+    }, headers=_NO_CACHE)

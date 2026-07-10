@@ -38,11 +38,14 @@ router = APIRouter()
 
 
 @router.get("/api/quota/config")
-def quota_config_get() -> dict[str, Any]:
+def quota_config_get() -> JSONResponse:
     rows = list(_bq.query(
         f"SELECT key, value, updated_at, updated_by FROM `{PROJECT}.{DATASET}.quota_config`"
     ).result())
-    return {r.key: {"value": r.value, "updated_at": r.updated_at.isoformat() if r.updated_at else None, "updated_by": r.updated_by} for r in rows}
+    return JSONResponse(
+        content={r.key: {"value": r.value, "updated_at": r.updated_at.isoformat() if r.updated_at else None, "updated_by": r.updated_by} for r in rows},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.post("/api/quota/config")
