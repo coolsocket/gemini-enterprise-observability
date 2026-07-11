@@ -32,6 +32,7 @@ from google.cloud import bigquery
 from apps.api.shared.infrastructure.bq_client import bq as _bq, PROJECT, DATASET
 from apps.api.shared.common import _json_safe
 from apps.api.contexts.quota.domain.tier_defaults import TIER_DEFAULTS
+from apps.api.contexts.quota.domain.quota_sql import render_totals_sql
 
 log = logging.getLogger("ge-obs")
 
@@ -162,39 +163,13 @@ def quota_overview(window_days: int = 1) -> JSONResponse:
     # falls through on Forbidden — EmptyState below handles the visual.
     _seed_missing_tier_defaults()
 
-    if window_days == 1:
-        totals_sql = f"SELECT * FROM `{PROJECT}.{DATASET}.v_quota_totals`"
-    else:
-        # Aggregate over last N CA days from v_daily_usage_per_user, then
-        # scale total_daily_quota × N so the ratio is comparable to today.
-        totals_sql = f"""
-        WITH usage AS (
-          SELECT feature, SUM(n) AS total_used_today,
-                 COUNT(DISTINCT actor_email) AS active_users
-          FROM `{PROJECT}.{DATASET}.v_daily_usage_per_user`
-          WHERE d >= DATE_SUB(DATE(CURRENT_TIMESTAMP(), 'America/Los_Angeles'),
-                              INTERVAL {window_days - 1} DAY)
-          GROUP BY feature
-        ),
-        capacity AS (
-          -- Reuse v_quota_totals for the today capacity/eligible seats,
-          -- then multiply by N to get the window capacity.
-          SELECT feature, eligible_users, total_daily_quota
-          FROM `{PROJECT}.{DATASET}.v_quota_totals`
-        )
-        SELECT
-          c.feature,
-          c.eligible_users,
-          c.total_daily_quota * {window_days} AS total_daily_quota,
-          IFNULL(u.total_used_today, 0) AS total_used_today,
-          SAFE_DIVIDE(IFNULL(u.total_used_today, 0),
-                      c.total_daily_quota * {window_days}) AS overall_utilization,
-          -- users_over_quota only meaningful for today; not defined for window.
-          0 AS users_over_quota
-        FROM capacity c
-        LEFT JOIN usage u USING (feature)
-        ORDER BY overall_utilization DESC
-        """
+    # Totals SQL is built by the pure domain module (R9 2026-07-11).
+    # Key win: the builder inlines a COALESCE fallback for the
+    # `quota.default_tier` config key so read-only tenants — where our
+    # lazy-seed cannot write — still get a populated dashboard. The
+    # view v_quota_totals silently returns empty in that case; this
+    # bypasses the view entirely.
+    totals_sql = render_totals_sql(PROJECT, DATASET, window_days)
 
     queries = {
         "totals":      totals_sql,
