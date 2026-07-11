@@ -45,14 +45,18 @@ def test_c1_quota_page_lists_notebooklm() -> None:
 
 
 def test_c1_bootstrap_seeds_notebooklm_tier_defaults() -> None:
-    src = (REPO / "infra/contexts/deploy/application/bootstrap.py").read_text()
-    assert "tier.standard.notebooklm_daily" in src, (
-        "Bootstrap doesn't seed a tier.standard.notebooklm_daily default. "
+    # Post-R7 (2026-07-11) TIER_DEFAULTS lives in the domain module;
+    # bootstrap imports it. Assert both notebooklm keys are present in
+    # the canonical list — bootstrap AND lazy-seed both use it.
+    from apps.api.contexts.quota.domain.tier_defaults import TIER_DEFAULTS
+    keys = {k for k, _ in TIER_DEFAULTS}
+    assert "tier.standard.notebooklm_daily" in keys, (
+        "TIER_DEFAULTS is missing tier.standard.notebooklm_daily. "
         "Without it v_quota_utilization has no daily_limit for the feature "
         "and it's dropped from the JOIN."
     )
-    assert "tier.plus.notebooklm_daily" in src, (
-        "Bootstrap doesn't seed a tier.plus.notebooklm_daily default."
+    assert "tier.plus.notebooklm_daily" in keys, (
+        "TIER_DEFAULTS is missing tier.plus.notebooklm_daily."
     )
 
 

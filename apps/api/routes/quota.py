@@ -31,10 +31,58 @@ from google.cloud import bigquery
 
 from apps.api.shared.infrastructure.bq_client import bq as _bq, PROJECT, DATASET
 from apps.api.shared.common import _json_safe
+from apps.api.contexts.quota.domain.tier_defaults import TIER_DEFAULTS
 
 log = logging.getLogger("ge-obs")
 
 router = APIRouter()
+
+# Guard: only attempt lazy-seed once per process. If the first attempt
+# fails on permissions (read-only identity like yehao ADC on the vivo
+# tenant), further retries would just log the same error every request.
+_seed_attempted = False
+
+
+def _seed_missing_tier_defaults() -> None:
+    """MERGE WHEN NOT MATCHED each key from TIER_DEFAULTS. Idempotent —
+    never overwrites admin edits (WHEN MATCHED is a no-op). Called from
+    quota_overview so fresh tenants get a populated dashboard on first
+    hit without an admin having to re-run bootstrap.
+
+    Swallows google.api_core.exceptions.Forbidden — read-only identities
+    (yehao ADC against foreign projects) legitimately can't write here,
+    and the panel already renders a helpful EmptyState in that case.
+    """
+    global _seed_attempted
+    if _seed_attempted:
+        return
+    _seed_attempted = True
+    from google.api_core.exceptions import Forbidden, NotFound
+    try:
+        for key, value in TIER_DEFAULTS:
+            _bq.query(
+                f"""
+                MERGE `{PROJECT}.{DATASET}.quota_config` t
+                USING (SELECT @k k, @v v) s
+                ON t.key = s.k
+                WHEN NOT MATCHED THEN INSERT (key, value, updated_at, updated_by)
+                  VALUES (s.k, s.v, CURRENT_TIMESTAMP(), 'lazy-seed')
+                """,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("k", "STRING", key),
+                        bigquery.ScalarQueryParameter("v", "STRING", value),
+                    ]
+                ),
+            ).result()
+    except Forbidden as e:
+        # Expected on read-only identities. Leave admins to explicitly
+        # seed via `POST /api/quota/config` or a re-run of bootstrap.
+        log.warning("lazy-seed skipped (no BQ write permission): %s", str(e)[:180])
+    except NotFound as e:
+        # quota_config table doesn't exist yet — fresh deploy before
+        # terraform apply. Bootstrap will create it.
+        log.warning("lazy-seed skipped (quota_config missing): %s", str(e)[:180])
 
 
 @router.get("/api/quota/config")
@@ -107,6 +155,12 @@ def quota_overview(window_days: int = 1) -> JSONResponse:
     # Clamp to supported windows.
     if window_days not in (1, 7, 30):
         window_days = 1 if window_days < 4 else (7 if window_days < 14 else 30)
+
+    # First-hit-per-process: MERGE WHEN NOT MATCHED all TIER_DEFAULTS so
+    # fresh tenants get a populated dashboard immediately. No-op on
+    # subsequent calls and on tenants that already have keys. Silently
+    # falls through on Forbidden — EmptyState below handles the visual.
+    _seed_missing_tier_defaults()
 
     if window_days == 1:
         totals_sql = f"SELECT * FROM `{PROJECT}.{DATASET}.v_quota_totals`"

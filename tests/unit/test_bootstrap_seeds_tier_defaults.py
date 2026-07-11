@@ -45,20 +45,29 @@ REQUIRED_TIER_KEYS = {
 
 
 def test_bootstrap_seeds_all_tier_defaults() -> None:
-    src = BOOTSTRAP.read_text()
-    # Simplest check: every required key appears literally somewhere in the
-    # bootstrap module. Deliberately case-sensitive — these are the exact
-    # strings the UI queries.
-    missing = sorted(k for k in REQUIRED_TIER_KEYS if k not in src)
+    # Post-R7 (2026-07-11) the TIER_DEFAULTS list moved to a shared
+    # domain module. bootstrap.py imports the same list; look up the
+    # keys there instead of grepping bootstrap.py inline.
+    from apps.api.contexts.quota.domain.tier_defaults import TIER_DEFAULTS
+    seeded = {k for k, _ in TIER_DEFAULTS}
+    missing = sorted(REQUIRED_TIER_KEYS - seeded)
     assert not missing, (
-        f"bootstrap.py doesn't seed these {len(missing)} tier keys that "
-        f"Quota.tsx needs:\n"
+        f"TIER_DEFAULTS (imported by bootstrap.py + routes/quota.py) is "
+        f"missing {len(missing)} tier keys that Quota.tsx needs:\n"
         + "\n".join(f"  - {k}" for k in missing)
-        + "\n\nWithout these seeded, the Quota page shows '—' for every "
-        "limit until an admin manually types values into the edit UI. "
-        "Add a MERGE ... WHEN NOT MATCHED THEN INSERT block for each in "
-        "seed_quota_config() so re-running bootstrap is safe (doesn't "
-        "overwrite admin edits) but first-time deploys get sane defaults."
+        + "\n\nAdd each (key, value) pair to "
+        "apps/api/contexts/quota/domain/tier_defaults.py so both the "
+        "deploy-time bootstrap AND the lazy-seed path pick them up."
+    )
+    # Sanity: bootstrap.py must actually import + iterate over
+    # TIER_DEFAULTS (not roll its own list).
+    src = BOOTSTRAP.read_text()
+    assert re.search(
+        r"from\s+apps\.api\.contexts\.quota\.domain\.tier_defaults\s+import\s+TIER_DEFAULTS",
+        src,
+    ), (
+        "bootstrap.py should import TIER_DEFAULTS from the domain module — "
+        "any inline list would drift from routes/quota.py's lazy-seed."
     )
 
 
