@@ -46,4 +46,10 @@ TIER_DEFAULTS: List[Tuple[str, str]] = [
     ("tier.plus.notebooklm_daily",        "100"),
     ("tier.plus.a2a_daily",               "50"),
     ("tier.plus.storage_gib",             "100"),
+    # Load-bearing: v_quota_totals uses this to bucket "seats not
+    # explicitly assigned via user_tier" into a tier. Without it,
+    # seat_pool has NULL tier → JOIN tier_limits drops those rows →
+    # per_feature_capacity ends up empty even when every tier.*_daily
+    # key IS seeded. Conservative default 'standard'; admin can flip.
+    ("quota.default_tier",                 "standard"),
 ]

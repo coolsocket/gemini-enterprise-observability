@@ -265,19 +265,27 @@ export default function Quota() {
           </div>
         )}
         {d.totals.length === 0 ? (
-          // Empty totals = no tier.*_daily keys in this tenant's
-          // quota_config. v_quota_totals's tier_limits CTE is empty →
-          // per_feature_capacity join gives 0 rows. Point the operator
-          // at the tier config table below so they know how to unblock.
+          // Empty totals = the v_quota_totals JOIN chain (tier_limits ×
+          // seat_pool → per_feature_capacity) produced no rows. Common
+          // root causes on a partially-configured tenant:
+          //   (a) tier.*_daily keys not seeded
+          //   (b) quota.default_tier missing (seat_pool.tier ends up
+          //       NULL, JOIN drops everything)
+          //   (c) purchased_seats / license.total_seats both null so
+          //       the leftover-seats term is zero
           <EmptyState
             title="没有配额数据"
             hint={
               <span>
-                此租户的 <code className="bg-subtle px-1 rounded">quota_config</code> 里
-                没有 <code className="bg-subtle px-1 rounded">tier.*_daily</code> 键 —
-                在下方 <b>"Tier 阈值配置"</b> 里给每个 feature (chat / deep_research /
-                notebooklm / a2a / agent_create) 填入 standard / plus 上限就会出现。
-                Sandbox 已经 seed 过默认值; vivo 生产环境需要 admin 手动配。
+                <code className="bg-subtle px-1 rounded">v_quota_totals</code> 返回空 —
+                检查 <code className="bg-subtle px-1 rounded">quota_config</code> 里:
+                <b>tier.*_daily</b> 每个 feature 都在 (chat / deep_research /
+                notebooklm / a2a / agent_create) · <b>quota.default_tier</b> 有值
+                (standard / plus) · <b>purchased_seats</b> 或 <b>license.total_seats</b> 有值。
+                下方 "Tier 阈值配置" 可直接编辑; 如果那些数字都在,通常是缺
+                <code className="bg-subtle px-1 rounded">quota.default_tier</code> —
+                POST <code className="bg-subtle px-1 rounded">/api/quota/config?key=quota.default_tier&amp;value=standard</code>
+                手动补一下。sandbox 是 lazy-seed 自动写的; vivo 只读身份下写不进去。
               </span>
             }
           />
