@@ -15,23 +15,28 @@
 """Pure SQL builder for /api/quota/overview totals.
 
 Extracted from routes/quota.py (R9, 2026-07-11) so the SQL can be
-unit-tested. The critical departure from `v_quota_totals` view is:
+unit-tested. Two critical departures from the `v_quota_totals` view:
 
   * `quota.default_tier` config key is COALESCE'd with `'standard'`
-    as a hard fallback. Without this fallback (as v_quota_totals is
-    currently defined), a tenant that hasn't set the key gets NULL
-    tier in seat_pool → JOIN tier_limits drops everything → totals
-    silently empty even though tier.*_daily + license.total_seats
-    ARE seeded.
+    as a hard fallback. Without this, a tenant missing the key gets
+    NULL tier in seat_pool → JOIN tier_limits drops everything →
+    totals silently empty (R9 fix).
+  * `tier_limits` is UNNEST'd from TIER_DEFAULTS as a fallback layer;
+    config values override defaults when present, missing config
+    entries fall back to canonical defaults. Without this fallback,
+    a tenant that seeded only some tier.*_daily keys (e.g. vivo old
+    bootstrap: chat / deep_research / agent_create) shows only those
+    features in totals; notebooklm / a2a are invisible even though
+    the frontend expects them (R10 2026-07-13 fix).
   * All computation reads base tables (quota_config, user_tier,
     v_daily_usage_per_user) directly. No dependency on v_quota_totals
-    or v_quota_utilization views. Read-only viewers (e.g. yehao ADC
-    against responsive-lens) can't self-heal the missing config key,
-    but they CAN read base tables. So this route path works there.
+    or v_quota_utilization views. Read-only viewers still work.
 
 Pure module: no I/O, no framework imports.
 """
 from __future__ import annotations
+
+from apps.api.contexts.quota.domain.tier_defaults import TIER_DEFAULTS
 
 
 def render_totals_sql(project: str, dataset: str, window_days: int) -> str:
@@ -68,16 +73,46 @@ def render_totals_sql(project: str, dataset: str, window_days: int) -> str:
             f"INTERVAL {window_days - 1} DAY)"
         )
         capacity_multiplier = window_days
+    # Build the STRUCT list for the tier_limits_defaults CTE.
+    # Only include _daily keys (skip tier.*.storage_gib — not a per-day
+    # feature, not surfaced in the totals grid).
+    default_structs: list[str] = []
+    for key, val in TIER_DEFAULTS:
+        if not key.startswith("tier.") or not key.endswith("_daily"):
+            continue
+        # tier.<tier>.<feature>_daily
+        parts = key.split(".")
+        tier = parts[1]
+        feature = parts[2][:-len("_daily")]
+        default_structs.append(
+            f"STRUCT('{tier}' AS tier, '{feature}' AS feature, "
+            f"{int(val)} AS default_limit)"
+        )
+    default_structs_sql = ",\n        ".join(default_structs)
     # SQL. Base tables only — no v_quota_totals / v_quota_utilization.
+    # tier_limits now merges TIER_DEFAULTS with the tenant's cfg so every
+    # canonical (tier, feature) always has a limit, but a configured
+    # value wins when present.
     return f"""
     WITH cfg AS (
       SELECT key, value FROM `{project}.{dataset}.quota_config`
     ),
-    tier_limits AS (
+    tier_limits_configured AS (
       SELECT SPLIT(key, '.')[SAFE_OFFSET(1)] AS tier,
              REGEXP_EXTRACT(key, r'\\.([^.]+)_daily$') AS feature,
-             CAST(value AS INT64) AS daily_limit
+             CAST(value AS INT64) AS cfg_limit
       FROM cfg WHERE key LIKE 'tier.%_daily'
+    ),
+    tier_limits_defaults AS (
+      SELECT * FROM UNNEST([
+        {default_structs_sql}
+      ])
+    ),
+    tier_limits AS (
+      SELECT d.tier, d.feature,
+             COALESCE(c.cfg_limit, d.default_limit) AS daily_limit
+      FROM tier_limits_defaults d
+      LEFT JOIN tier_limits_configured c USING (tier, feature)
     ),
     default_tier AS (
       -- KEY FIX (R9): COALESCE with 'standard' so a tenant that hasn't
