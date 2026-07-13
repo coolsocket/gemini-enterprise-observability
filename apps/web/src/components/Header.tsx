@@ -117,21 +117,34 @@ function RangeToggle() {
     setRange(v);
     qc.invalidateQueries();
   };
+  // The chip label mirrors the button state so users get an always-
+  // visible "current range: X" indication after they click. Without
+  // this, the button's highlighted state alone was too subtle —
+  // reporter (2026-07-13): "时间聚合按钮好像没有意义".
+  const activeLabel = opts.find((o) => o.val === range)?.label ?? "?";
   return (
-    <div className="inline-flex items-center h-8 rounded-md border border-border-subtle bg-surface overflow-hidden text-xs" title="时间范围">
-      {opts.map((o) => (
-        <button
-          key={String(o.val)}
-          onClick={() => pick(o.val)}
-          className={`px-2.5 h-full transition-colors tabular-nums ${
-            range === o.val
-              ? "bg-info/20 text-info font-medium"
-              : "text-ink-secondary hover:text-ink-primary hover:bg-subtle"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
+    <div className="inline-flex items-center gap-2">
+      <span
+        className="inline-flex items-center gap-1 h-6 px-2 rounded-md border border-info/30 bg-info/10 text-info text-[11px] font-medium tabular-nums"
+        title="当前所选的时间范围 — 数据端点都会用这个 since_hours 过滤"
+      >
+        📅 当前: {activeLabel}
+      </span>
+      <div className="inline-flex items-center h-8 rounded-md border border-border-subtle bg-surface overflow-hidden text-xs" title="时间范围">
+        {opts.map((o) => (
+          <button
+            key={String(o.val)}
+            onClick={() => pick(o.val)}
+            className={`px-2.5 h-full transition-colors tabular-nums ${
+              range === o.val
+                ? "bg-info/20 text-info font-medium"
+                : "text-ink-secondary hover:text-ink-primary hover:bg-subtle"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -174,7 +174,7 @@ export default function Conversations() {
               title="没有会话"
               hint={filter !== "all" ? "改 filter 试试" : (
                 <>
-                  没数据通常有两个原因:
+                  没数据通常有 3 个原因:
                   <ol className="list-decimal list-inside mt-1 space-y-0.5 text-left">
                     <li>还没有流量(等一等 GE 侧发生 chat)</li>
                     <li><b>GE Console 里 Prompt &amp; Response Logging 没打开</b> ——
@@ -184,6 +184,16 @@ export default function Conversations() {
                       <code className="bg-subtle px-1 rounded">docs/GE_CONSOLE_SETUP.md</code>)。
                       历史 chat 内容无法追回(源头没记), <code>make backfill</code> 也捞不到 ——
                       只有开启后的新 chat 才有内容。
+                    </li>
+                    <li><b>OIDC/WIF 租户特殊 schema</b> ——
+                      像 vivo 这种走 Workforce Identity Federation 的租户,
+                      <code className="bg-subtle px-1 rounded">gemini_enterprise_user_activity</code> 表里
+                      StreamAssist 的 <code>request.query = null</code>(prompt 上游没被写进 audit log 侧),
+                      真正的 prompt 内容躺在 <code>gen_ai_user_message</code> 表里但{" "}
+                      <b>没有用户身份字段</b>(useriamprincipal 缺失),
+                      两张表拼不起 (actor, prompt)。已确认 vivo 就是这种情况:
+                      audit 6524 rows / 7d 里 StreamAssist 只 19 次 · gen_ai 那边有 205K
+                      条消息但无 principal 绑定。需要 GE 侧改 log schema 才能补齐。
                     </li>
                   </ol>
                 </>

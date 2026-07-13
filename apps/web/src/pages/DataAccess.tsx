@@ -53,6 +53,44 @@ export default function DataAccess() {
   });
   const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents });
 
+  // Client-side collapse: v_data_access_summary GROUPs by (actor,
+  // engine_id, engine_display_name). A single user with mixed engine
+  // and admin-level calls (e.g. DevToolsConfigService, no engine_id)
+  // gets split into two rows. Reporter (vivo 2026-07-13) called this
+  // out. Fold everything back into one row per actor; keep engine list
+  // as a comma-joined column.
+  const summaryByActor = useMemo(() => {
+    const acc: Record<string, DataAccessSummaryRow & { engines: Set<string> }> = {};
+    (summary.data?.rows ?? []).forEach(r => {
+      const key = r.actor_email ?? "(unknown)";
+      const cur = acc[key];
+      if (!cur) {
+        acc[key] = { ...r, engines: new Set(r.engine_display_name ? [r.engine_display_name] : []) };
+        return;
+      }
+      // sum every numeric metric column
+      for (const k of Object.keys(r) as (keyof DataAccessSummaryRow)[]) {
+        if (typeof r[k] === "number") {
+          // @ts-expect-error dynamic sum on typed union
+          cur[k] = (cur[k] as number) + (r[k] as number);
+        }
+      }
+      // pick later last_access
+      if (r.last_access && (!cur.last_access || r.last_access > cur.last_access)) {
+        cur.last_access = r.last_access;
+      }
+      // union engine set (only real engines, "(admin)" for null)
+      cur.engines.add(r.engine_display_name ?? "(admin API)");
+    });
+    // Add the first-row's engine to the engine set for single-engine users
+    Object.values(acc).forEach(row => {
+      if (row.engines.size === 0) {
+        row.engines.add(row.engine_display_name ?? "(admin API)");
+      }
+    });
+    return Object.values(acc).sort((a, b) => (b.total_data_access ?? 0) - (a.total_data_access ?? 0));
+  }, [summary.data?.rows]);
+
   // Pivot daily rows → (day → {feature: n, total: n}) sorted desc by day.
   const dailyPivot = useMemo(() => {
     const byDay: Record<string, Record<string, number>> = {};
@@ -70,7 +108,9 @@ export default function DataAccess() {
   }, [daily.data?.rows]);
 
   // Simplified: hide autocomplete (noise) + session_files; surface chat/search/session/feedback
-  const summaryCols: Col<DataAccessSummaryRow>[] = [
+  // Columns render an aggregated row (`summaryByActor` above) — the
+  // engine column shows the joined list (one row per actor now).
+  const summaryCols: Col<DataAccessSummaryRow & { engines?: Set<string> }>[] = [
     { key: "actor_email", label: "Actor", mono: true },
     {
       key: "origin", label: "Origin",
@@ -80,8 +120,17 @@ export default function DataAccess() {
         </span>
       ),
     },
-    { key: "engine_display_name", label: "Engine",
-      render: (r) => r.engine_display_name ?? <span className="text-ink-muted">—</span> },
+    { key: "engine_display_name", label: "Engines",
+      render: (r) => {
+        const list = r.engines ? Array.from(r.engines) : [r.engine_display_name ?? "(admin API)"];
+        return (
+          <span title={list.join(" · ")}>
+            {list.length === 1 ? list[0] : (
+              <span className="text-ink-secondary">{list.length} <span className="text-ink-muted text-[10px]">engines</span></span>
+            )}
+          </span>
+        );
+      } },
     { key: "chat_turns", label: "Chat 回合", num: true,
       render: (r) => <span className={r.chat_turns > 0 ? "text-ggreen font-medium" : "text-ink-muted"}>{r.chat_turns}</span> },
     { key: "deep_research_calls", label: "Deep Research", num: true,
@@ -274,7 +323,7 @@ export default function DataAccess() {
           </button>
         }>
         {!summary.data ? <EmptyState title="加载中…" /> : (
-          <DataTable rows={summary.data.rows} cols={summaryCols} filterKeys={["actor_email", "engine_display_name", "origin"]} />
+          <DataTable rows={summaryByActor} cols={summaryCols} filterKeys={["actor_email", "engine_display_name", "origin"]} />
         )}
       </Panel>
 
