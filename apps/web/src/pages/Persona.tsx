@@ -14,12 +14,27 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { api, PersonaRow, LicensedUser } from "../api";
+import { api, PersonaRow, LicensedUser, PersonaUnifiedRow } from "../api";
 import DataTable, { Col, fmtTs } from "../components/DataTable";
 import { Panel, EmptyState } from "../components/Card";
 import { useOrigin } from "../origin";
 import { useRange } from "../timerange";
 import { ORIGIN_TAG, PERSONA_TAG } from "../tags";
+
+// R13 (2026-07-13): cohort labels for the unified panel.
+// matched         both sources (has seat AND appears in logs)
+// licensed_only   bought a seat, no observable events
+// log_only        events attributed to this principal, no matching license
+const COHORT_TAG: Record<string, string> = {
+  matched:       "bg-ggreen/15 text-ggreen border-ggreen/30",
+  licensed_only: "bg-warn/15   text-warn   border-warn/30",
+  log_only:      "bg-ink-muted/15 text-ink-muted border-ink-muted/30",
+};
+const COHORT_LABEL: Record<string, string> = {
+  matched:       "🟢 有 seat + 活跃",
+  licensed_only: "🟡 有 seat 未曾使用",
+  log_only:      "⚪ 有活动无 seat",
+};
 
 
 
@@ -37,6 +52,26 @@ export default function Persona() {
     // Poll rarely — hitting DE for 300+ rows every focus is wasteful.
     staleTime: 5 * 60_000,
   });
+  // R13: full outer join (licensed ⋈ persona), the "全量方案".
+  const unified = useQuery({
+    queryKey: ["persona-unified"],
+    queryFn:  () => api.personaUnified(),
+    staleTime: 5 * 60_000,
+  });
+  const [cohortFilter, setCohortFilter] = useState<"all" | "matched" | "licensed_only" | "log_only">("all");
+  const unifiedRows = useMemo(() => {
+    const rows = unified.data?.users ?? [];
+    const filtered = cohortFilter === "all" ? rows : rows.filter(r => r.cohort === cohortFilter);
+    // Sort: licensed_only first (paid but idle — most actionable),
+    // then matched by chat_turns_total desc, then log_only tail.
+    return [...filtered].sort((a, b) => {
+      const rank = (u: PersonaUnifiedRow) =>
+        u.cohort === "licensed_only" ? 0 : u.cohort === "matched" ? 1 : 2;
+      const ra = rank(a), rb = rank(b);
+      if (ra !== rb) return ra - rb;
+      return (b.chat_turns_total || 0) - (a.chat_turns_total || 0);
+    });
+  }, [unified.data, cohortFilter]);
 
   const [licensedFilter, setLicensedFilter] = useState<"all" | "unseen">("all");
   const licensedRows = useMemo(() => {
@@ -114,6 +149,94 @@ export default function Persona() {
           <div><span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border mr-2 ${PERSONA_TAG.AUTOMATION}`}>AUTOMATION</span><span className="text-ink-muted">service account</span></div>
         </div>
       </div>
+
+      {/* R13 · 全量方案 · full outer join (persona ⋈ license) */}
+      <Panel
+        title={
+          unified.data
+            ? `全量用户 · ${unified.data.counts.total} `
+              + `(🟢 ${unified.data.counts.matched} 活跃有 seat · `
+              + `🟡 ${unified.data.counts.licensed_only} 有 seat 未曾使用 · `
+              + `⚪ ${unified.data.counts.log_only} 有活动无 seat)`
+            : "全量用户 · 加载中…"
+        }
+        action={
+          unified.data && unified.data.counts.total > 0 && (
+            <div className="flex items-center gap-1 text-[10px]">
+              {(["all", "licensed_only", "matched", "log_only"] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setCohortFilter(f)}
+                  className={`h-6 px-2 rounded ${cohortFilter === f
+                    ? "bg-info/15 text-info border border-info/30 font-medium"
+                    : "text-ink-muted hover:text-ink-secondary border border-transparent"}`}
+                >
+                  {f === "all" ? `全部 (${unified.data.counts.total})` :
+                   f === "matched" ? `活跃有 seat (${unified.data.counts.matched})` :
+                   f === "licensed_only" ? `未曾使用 (${unified.data.counts.licensed_only})` :
+                   `无 seat (${unified.data.counts.log_only})`}
+                </button>
+              ))}
+            </div>
+          )
+        }
+      >
+        <div className="text-[10px] text-ink-muted mb-3">
+          <b>持久 identity 视角:</b> 用 OIDC subject 全 outer join userLicenses ⋈ v_user_persona。
+          "🟡 未曾使用" 是最容易采取行动的 cohort (推 onboarding 或回收 seat);
+          "⚪ 无 seat" 通常是撤 license 后 log 还留着的历史尾巴 / SIM 用户。
+        </div>
+        {!unified.data ? <EmptyState title="加载中…" /> :
+         unified.data.counts.total === 0 ? (
+          <EmptyState title="没有数据" hint="两个源都空 — 检查 GE 订阅接口权限 + BQ log sink" />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-ink-muted border-b border-border-subtle/40">
+                  <th className="py-1.5 pr-3 font-normal">User Principal</th>
+                  <th className="py-1.5 pr-3 font-normal">Cohort</th>
+                  <th className="py-1.5 pr-3 font-normal">Persona</th>
+                  <th className="py-1.5 pr-3 font-normal text-right">Chat 7d</th>
+                  <th className="py-1.5 pr-3 font-normal text-right">Chat 总</th>
+                  <th className="py-1.5 pr-3 font-normal">License</th>
+                  <th className="py-1.5 pr-3 font-normal">最近登录</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unifiedRows.slice(0, 500).map((u: PersonaUnifiedRow) => (
+                  <tr key={u.user_principal} className="border-b border-border-subtle/20 hover:bg-subtle/30">
+                    <td className="py-1 pr-3 font-mono text-ink-primary">{u.user_principal}</td>
+                    <td className="py-1 pr-3">
+                      <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] border ${COHORT_TAG[u.cohort]}`}>
+                        {COHORT_LABEL[u.cohort]}
+                      </span>
+                    </td>
+                    <td className="py-1 pr-3">
+                      {u.persona ? (
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] border ${PERSONA_TAG[u.persona] ?? PERSONA_TAG.LURKER}`}>
+                          {u.persona}
+                        </span>
+                      ) : <span className="text-ink-muted">—</span>}
+                    </td>
+                    <td className="py-1 pr-3 text-right tabular-nums">{u.chat_turns_7d || <span className="text-ink-muted">·</span>}</td>
+                    <td className="py-1 pr-3 text-right tabular-nums">{u.chat_turns_total || <span className="text-ink-muted">·</span>}</td>
+                    <td className="py-1 pr-3 text-ink-muted text-[10px]">{u.license_state ?? "—"}</td>
+                    <td className="py-1 pr-3 font-mono text-ink-muted text-[10px]">
+                      {u.last_login_time ? fmtTs(u.last_login_time) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {unifiedRows.length > 500 && (
+              <div className="text-[10px] text-ink-muted mt-2 text-center">
+                显示前 500 / {unifiedRows.length} 行
+              </div>
+            )}
+          </div>
+        )}
+      </Panel>
 
       <Panel title={`用户画像 · 已观察到的活跃用户 ${origin ? `· 只看 ${origin}` : "· 全部 origin"} · ${q.data?.count ?? "…"} 人`}>
         <div className="text-[10px] text-ink-muted mb-2">

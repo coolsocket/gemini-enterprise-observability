@@ -452,6 +452,34 @@ export type LicensedUsers = {
   note?: string;
 };
 
+// Full outer join: log persona ⋈ subscription license.
+// One row per unique user_principal, tagged with a cohort.
+export type PersonaUnifiedRow = {
+  user_principal: string;
+  cohort: "matched" | "licensed_only" | "log_only";
+  // persona-side (null if licensed_only)
+  persona: string | null;
+  chat_turns_total: number;
+  chat_turns_7d: number;
+  resources_created: number;
+  last_seen: string | null;
+  origin: string | null;
+  // license-side (null if log_only)
+  license_state: string | null;
+  last_login_time: string | null;
+  license_config: string | null;
+  create_time: string | null;
+};
+export type PersonaUnified = {
+  users: PersonaUnifiedRow[];
+  counts: {
+    total: number;
+    matched: number;
+    licensed_only: number;
+    log_only: number;
+  };
+};
+
 export type QuotaOverview = {
   today_ca: string;
   window_days: number;
@@ -483,6 +511,7 @@ export const api = {
   quotaOverview: (windowDays: 1 | 7 | 30 = 1) =>
     get<QuotaOverview>(`/api/quota/overview?window_days=${windowDays}`),
   personaLicensedUsers: () => get<LicensedUsers>("/api/persona/licensed_users"),
+  personaUnified:       () => get<PersonaUnified>("/api/persona/unified"),
   quotaSetTier:  (email: string, tier: "standard" | "plus", notes = "") =>
     post<{ email: string; tier: string; ok: boolean }>(`/api/quota/tier?email=${encodeURIComponent(email)}&tier=${tier}&by=ui&notes=${encodeURIComponent(notes)}`),
 };

@@ -43,6 +43,7 @@ from apps.api.shared.common import (
 )
 from apps.api.contexts.quota.domain.license_parse import parse_license_configs
 from apps.api.contexts.quota.domain.user_license_parse import parse_user_licenses
+from apps.api.contexts.observability.domain.persona_join import persona_join_licenses
 
 log = logging.getLogger("ge-obs")
 
@@ -274,6 +275,55 @@ def persona_licensed_users() -> JSONResponse:
         parsed["note"] = ("此租户没有 userLicenses 数据 (403/404 或未启用 DE 订阅). "
                           "Reporter 侧 vivo 有真实数据; sandbox 是意料之中的空.")
     return JSONResponse(content=parsed, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/persona/unified")
+def persona_unified() -> JSONResponse:
+    """Full outer join · log-derived persona ⋈ subscription licenses.
+
+    Delivers the "全量方案" the reporter asked for on 2026-06 and
+    pushed on again 2026-07-13. Two sources fetched in parallel, joined
+    on OIDC subject / email, tagged per row with a cohort:
+
+      matched         seat + observable events (healthy adopters)
+      licensed_only   bought a seat, no events in the log window
+                      (candidates for onboarding push or seat reclaim)
+      log_only        events attributed to this principal but no
+                      matching license (revoked mid-history / SIM
+                      users / edge cases)
+
+    Returns {users, counts}. Never 500s — read-only tenants get a
+    licensed_only=0 side and just the log_only + matched cohorts;
+    tenants without gen_ai/audit logs get everything as licensed_only.
+    """
+    import concurrent.futures
+    def fetch_persona():
+        try:
+            sql = f"SELECT * FROM `{PROJECT}.{DATASET}.{snapshot_name('v_user_persona')}`"
+            return [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+        except Exception:
+            # snapshot missing → live view
+            try:
+                sql = f"SELECT * FROM `{PROJECT}.{DATASET}.v_user_persona`"
+                return [_json_safe(dict(r)) for r in _bq.query(sql).result()]
+            except Exception as e:
+                log.warning("persona_unified: v_user_persona unavailable: %s", str(e)[:180])
+                return []
+    def fetch_licenses():
+        try:
+            return _fetch_user_licenses()
+        except Exception as e:
+            log.warning("persona_unified: userLicenses unavailable: %s", str(e)[:180])
+            return []
+    from apps.api.shared.infrastructure.bq_client import MAX_WORKERS_PER_ROUTE
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, MAX_WORKERS_PER_ROUTE)) as pool:
+        f_persona = pool.submit(fetch_persona)
+        f_licenses = pool.submit(fetch_licenses)
+        persona_rows = f_persona.result()
+        licensed_rows_raw = f_licenses.result()
+    licensed_rows = parse_user_licenses(licensed_rows_raw)["users"]
+    merged = persona_join_licenses(persona_rows, licensed_rows)
+    return JSONResponse(content=merged, headers={"Cache-Control": "no-store"})
 
 
 def _refresh_one_view(view_name: str, triggered_by: str) -> dict[str, Any]:
