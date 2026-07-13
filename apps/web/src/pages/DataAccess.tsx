@@ -57,8 +57,9 @@ export default function DataAccess() {
   // engine_id, engine_display_name). A single user with mixed engine
   // and admin-level calls (e.g. DevToolsConfigService, no engine_id)
   // gets split into two rows. Reporter (vivo 2026-07-13) called this
-  // out. Fold everything back into one row per actor; keep engine list
-  // as a comma-joined column.
+  // out. Fold everything back into one row per actor; the `engines`
+  // Set holds ONLY real (non-null) engine names so the render layer
+  // can pick the correct label based on Set size.
   const summaryByActor = useMemo(() => {
     const acc: Record<string, DataAccessSummaryRow & { engines: Set<string> }> = {};
     (summary.data?.rows ?? []).forEach(r => {
@@ -79,14 +80,9 @@ export default function DataAccess() {
       if (r.last_access && (!cur.last_access || r.last_access > cur.last_access)) {
         cur.last_access = r.last_access;
       }
-      // union engine set (only real engines, "(admin)" for null)
-      cur.engines.add(r.engine_display_name ?? "(admin API)");
-    });
-    // Add the first-row's engine to the engine set for single-engine users
-    Object.values(acc).forEach(row => {
-      if (row.engines.size === 0) {
-        row.engines.add(row.engine_display_name ?? "(admin API)");
-      }
+      // Only real engines join the Set. Admin-only rows (null engine)
+      // don't inflate the count; they're implicit in the totals.
+      if (r.engine_display_name) cur.engines.add(r.engine_display_name);
     });
     return Object.values(acc).sort((a, b) => (b.total_data_access ?? 0) - (a.total_data_access ?? 0));
   }, [summary.data?.rows]);
@@ -120,14 +116,22 @@ export default function DataAccess() {
         </span>
       ),
     },
-    { key: "engine_display_name", label: "Engines",
+    { key: "engine_display_name", label: "Engine",
       render: (r) => {
-        const list = r.engines ? Array.from(r.engines) : [r.engine_display_name ?? "(admin API)"];
+        const real = r.engines ? Array.from(r.engines) : (r.engine_display_name ? [r.engine_display_name] : []);
+        // 0 real engines → all activity was admin-level (no engine context)
+        if (real.length === 0) {
+          return <span className="text-ink-muted italic text-[11px]" title="所有请求都是 admin/管理面调用 (如 DevToolsConfigService), 没挂 engine">(admin API)</span>;
+        }
+        // 1 real engine → show name (co-existing admin calls implicit in totals)
+        if (real.length === 1) {
+          return <span title={real[0]}>{real[0]}</span>;
+        }
+        // 2+ real engines → collapse count, hover for the list
         return (
-          <span title={list.join(" · ")}>
-            {list.length === 1 ? list[0] : (
-              <span className="text-ink-secondary">{list.length} <span className="text-ink-muted text-[10px]">engines</span></span>
-            )}
+          <span title={real.join(" · ")}>
+            <span className="text-ink-secondary">{real.length}</span>
+            <span className="text-ink-muted text-[10px] ml-1">engines</span>
           </span>
         );
       } },
