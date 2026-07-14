@@ -290,6 +290,13 @@ class SummaryResponse(BaseModel):
 
     Grouped by intent for readability — the SELECT list in
     render_summary_sql uses the same order so drift is obvious.
+
+    NOTE (2026-07-14 · R14 sim): BQ COUNTIF over an empty CTE returns
+    NULL, not 0. Pydantic default = 0 only fires when the KEY is
+    missing; a present-None value would still fail strict int
+    validation. The `mode="before"` normalizer below coerces None →
+    0 for every numeric field so first-deploy on an empty dataset
+    doesn't 500 the summary endpoint.
     """
     model_config = {"extra": "forbid"}
     # adoption + quality
@@ -311,3 +318,22 @@ class SummaryResponse(BaseModel):
     last_admin_event:         Optional[str] = None
     last_data_access_event:   Optional[str] = None
     last_user_activity_event: Optional[str] = None
+
+    @classmethod
+    def _numeric_field_names(cls) -> set[str]:
+        # Compute once at class-load; keep intent-local (not a public API).
+        return {n for n, f in cls.model_fields.items() if f.annotation is int}
+
+    # Pre-validation normalizer: replace None with 0 for every numeric
+    # field. Only touches None values, so a legitimate 0 stays 0.
+    @classmethod
+    def model_validate(cls, data, **kwargs):  # type: ignore[override]
+        if isinstance(data, dict):
+            nums = cls._numeric_field_names()
+            data = {k: (0 if v is None and k in nums else v) for k, v in data.items()}
+        return super().model_validate(data, **kwargs)
+
+    def __init__(self, **data):
+        nums = type(self)._numeric_field_names()
+        clean = {k: (0 if v is None and k in nums else v) for k, v in data.items()}
+        super().__init__(**clean)
