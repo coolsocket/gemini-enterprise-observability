@@ -46,6 +46,14 @@ from apps.api.contexts.observability.domain.view_registry import (  # noqa: F401
 # POST /api/refresh/seats).
 LICENSE_REFRESH_INTERVAL_SEC = int(os.environ.get("LICENSE_REFRESH_INTERVAL_SEC", str(24 * 3600)))
 
+# Snapshot re-materialization cadence for the in-process auto-refresh loop
+# (6h default). Snapshots (s_*) are what the dashboard reads by default;
+# without a cadence they freeze at the last manual POST /api/refresh — the
+# "vivo stuck at 7.9" bug (2026-07-15). This loop is the deploy-target-
+# agnostic guarantee (works on Cloud Run / VM / local) that snapshots stay
+# current. Set to 0 to disable (e.g. when a BQ Scheduled Query owns refresh).
+SNAPSHOT_REFRESH_INTERVAL_SEC = int(os.environ.get("SNAPSHOT_REFRESH_INTERVAL_SEC", str(6 * 3600)))
+
 
 _VALID_ORIGINS = {"HUMAN", "AUTOMATION", "UNKNOWN", "SIMULATED"}
 

@@ -54,6 +54,7 @@ _CSRF_EXTRA_ORIGINS = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await refresh._start_seat_refresh_loop()
+    await refresh._start_snapshot_refresh_loop()
     yield
 
 

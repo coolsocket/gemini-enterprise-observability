@@ -37,6 +37,7 @@ from google.cloud import bigquery
 from apps.api.shared.infrastructure.bq_client import bq as _bq, PROJECT, DATASET
 from apps.api.shared.common import (
     LICENSE_REFRESH_INTERVAL_SEC,
+    SNAPSHOT_REFRESH_INTERVAL_SEC,
     VIEWS,
     snapshot_name,
     _json_safe,
@@ -446,5 +447,50 @@ async def _start_seat_refresh_loop() -> None:
             except Exception as e:
                 log.warning("seat auto-refresh failed: %s", e)
             await asyncio.sleep(LICENSE_REFRESH_INTERVAL_SEC)
+
+    asyncio.create_task(_loop())
+
+
+# ============================================================
+# Background: auto-refresh snapshot tables on startup + every N hours.
+# WHY THIS EXISTS: the dashboard reads snapshot tables (s_*) by default,
+# not the live v_* views. Snapshots are only re-materialized by
+# POST /api/refresh. The original design assumed a BQ Scheduled Query
+# would drive that on a cadence — but no such scheduled query is created
+# by terraform, so on a real deploy the snapshots freeze at whenever
+# someone last hit /api/refresh (reporter's "vivo stuck at 7.9" bug,
+# 2026-07-15). This in-process loop is the deploy-target-agnostic
+# guarantee that the dashboard stays current.
+#
+# Cloud Run caveat: with >1 instance each runs its own loop — that's
+# fine (refresh is idempotent CREATE OR REPLACE); the redundant work is
+# cheap relative to correctness. For a single authoritative refresher,
+# set SNAPSHOT_REFRESH_INTERVAL_SEC=0 and drive refresh from a BQ
+# Scheduled Query or Cloud Scheduler → POST /api/refresh instead.
+# ============================================================
+async def _start_snapshot_refresh_loop() -> None:
+    """FastAPI lifespan hook. Kicks a background task that re-materializes
+    every snapshot via refresh_now() on startup and then every
+    SNAPSHOT_REFRESH_INTERVAL_SEC (6h default). Set the env var to 0 to
+    disable — POST /api/refresh still works on-demand. Returns
+    immediately; the loop runs forever via asyncio.create_task."""
+    if SNAPSHOT_REFRESH_INTERVAL_SEC <= 0:
+        log.info("snapshot auto-refresh disabled (SNAPSHOT_REFRESH_INTERVAL_SEC=0)")
+        return
+
+    async def _loop() -> None:
+        # Longer initial delay than the seat loop: a fresh deploy may need
+        # the log-sink source tables + v_* views to exist first. If they
+        # don't yet, refresh_now() skips missing views quietly and the
+        # next tick picks them up.
+        await asyncio.sleep(30)
+        while True:
+            try:
+                result = await asyncio.to_thread(refresh_now, "auto")
+                log.info("snapshot auto-refresh ok: %s snapshots refreshed",
+                         result.get("ok_count"))
+            except Exception as e:
+                log.warning("snapshot auto-refresh failed: %s", e)
+            await asyncio.sleep(SNAPSHOT_REFRESH_INTERVAL_SEC)
 
     asyncio.create_task(_loop())
